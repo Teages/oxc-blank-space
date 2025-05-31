@@ -1,0 +1,16 @@
+{
+  "name": "playground",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "play": "jiti index.ts",
+    "lint": "eslint --cache .",
+    "lint:fix": "eslint --cache --fix ."
+  },
+  "dependencies": {
+    "@teages/oxc-blank-space": "workspace:*"
+  },
+  "devDependencies": {
+    "jiti": "2.4.2"
+  }
+}

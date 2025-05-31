@@ -1,0 +1,66 @@
+{
+  "name": "@teages/oxc-blank-space",
+  "type": "module",
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.11.0",
+  "description": "",
+  "license": "MIT",
+  "repository": "Teages/oxc-blank-space",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "typesVersions": {
+    "*": {
+      ".": [
+        "./dist/index.d.mts"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": "^20.17.0 || >=22.0.0"
+  },
+  "scripts": {
+    "build": "unbuild",
+    "play:prepare": "unbuild --stub",
+    "play": "pnpm -C playground play",
+    "dev": "vitest dev",
+    "lint": "eslint --cache . && pnpm -C playground lint",
+    "lint:fix": "eslint --cache --fix . && pnpm -C playground lint:fix",
+    "prepack": "pnpm build",
+    "release": "pnpm test && changelogen --release --push && pnpm publish",
+    "test": "pnpm lint && pnpm test:types && vitest run --coverage",
+    "test:types": "tsc --noEmit --skipLibCheck"
+  },
+  "dependencies": {
+    "magic-string": "^0.30.17",
+    "oxc-parser": "^0.72.1"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.13.2",
+    "@types/node": "^22.15.21",
+    "@vitest/coverage-v8": "^3.1.4",
+    "changelogen": "^0.6.1",
+    "eslint": "^9.27.0",
+    "jiti": "2.4.2",
+    "typescript": "^5.8.3",
+    "unbuild": "^3.5.0",
+    "vitest": "^3.1.4"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver"
+    ]
+  }
+}
