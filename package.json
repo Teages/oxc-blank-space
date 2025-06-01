@@ -39,6 +39,9 @@
     "test": "pnpm lint && pnpm test:types && vitest run --coverage",
     "test:types": "tsc --noEmit --skipLibCheck"
   },
+  "peerDependencies": {
+    "typescript": "^5.8.3"
+  },
   "dependencies": {
     "magic-string": "^0.30.17",
     "oxc-parser": "^0.72.1"

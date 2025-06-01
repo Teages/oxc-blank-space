@@ -1,14 +1,13 @@
 import type { Node } from 'oxc-parser'
 import { parseSync } from 'oxc-parser'
+import { SyntaxKind } from 'typescript'
 import { CodeString } from './code-string'
+import { walkTokens } from './token'
 import { walk } from './walker'
 
 export function test() {
   return 'works!'
 }
-
-const inlineBracketsLeft = new Set(['(', '['])
-const inlineBracketsRight = new Set([')', ']'])
 
 export function transplat(code: string) {
   const ast = parseSync('code.ts', code)
@@ -65,15 +64,23 @@ export function transplat(code: string) {
         return
       }
 
+      const tokenToRemove = new Set<SyntaxKind>()
+
       if (node.implements?.length) {
         const start = node.implements[0].start
         const end = node.implements[node.implements.length - 1].end
         s.blank(start, end)
+        tokenToRemove.add(SyntaxKind.ImplementsKeyword)
+      }
 
-        // we also need to remove the implements keyword
-        const keywordIndex = s.searchPrev('implements', start)
-        if (keywordIndex !== null) {
-          s.blank(keywordIndex, keywordIndex + 'implements'.length)
+      if (node.abstract) {
+        tokenToRemove.add(SyntaxKind.AbstractKeyword)
+      }
+
+      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+        if (tokenToRemove.has(token.kind)) {
+          tokenToRemove.delete(token.kind)
+          s.blank(node.start + token.start, node.start + token.end)
         }
       }
 
@@ -91,13 +98,30 @@ export function transplat(code: string) {
       node.typeArguments,
       ...node.arguments,
     ],
-    VariableDeclarator: node => [
-      node.id,
-      node.init,
-    ],
+    VariableDeclarator: (node) => {
+      if (node.definite) {
+        for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+          if (token.kind === SyntaxKind.ExclamationToken) {
+            s.blank(node.start + token.start, node.start + token.end)
+            break
+          }
+        }
+      }
+
+      return [
+        node.id,
+        node.init,
+      ]
+    },
     Identifier: (node) => {
-      // if (node.optional) {
-      // }
+      if (node.optional as boolean) { // FIXME: oxc-parser type is not correct
+        for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+          if (token.kind === SyntaxKind.QuestionToken) {
+            s.blank(node.start + token.start, node.start + token.end)
+            break
+          }
+        }
+      }
 
       return [
         node.typeAnnotation,
@@ -153,9 +177,31 @@ export function transplat(code: string) {
         return
       }
 
+      for (const specifier of node.specifiers) {
+        if (specifier.type === 'ExportSpecifier' && specifier.exportKind === 'type') {
+          removeNodeInline(specifier)
+          // remove its follow ','
+
+          for (const token of walkTokens(s.getCurrent(specifier.end, node.end))) {
+            // found '}'
+            if (token.kind === SyntaxKind.CloseParenToken) {
+              break
+            }
+
+            // found ','
+            if (token.kind === SyntaxKind.CommaToken) {
+              s.blank(specifier.end + token.start, specifier.end + token.end)
+              break
+            }
+          }
+        }
+      }
+
       return [
         node.declaration,
-        ...node.specifiers,
+        ...node.specifiers.filter(
+          specifier => specifier.exportKind !== 'type',
+        ),
         node.source,
         ...node.attributes,
       ]
@@ -166,8 +212,31 @@ export function transplat(code: string) {
         return
       }
 
+      for (const specifier of node.specifiers) {
+        if (specifier.type === 'ImportSpecifier' && specifier.importKind === 'type') {
+          removeNodeInline(specifier)
+          // remove its follow ','
+
+          for (const token of walkTokens(s.getCurrent(specifier.end, node.end))) {
+            // found '}'
+            if (token.kind === SyntaxKind.CloseParenToken) {
+              break
+            }
+
+            // found ','
+            if (token.kind === SyntaxKind.CommaToken) {
+              s.blank(specifier.end + token.start, specifier.end + token.end)
+              break
+            }
+          }
+        }
+      }
+
       return [
-        ...node.specifiers,
+        ...node.specifiers.filter(
+          specifier => specifier.type === 'ImportSpecifier'
+            && specifier.importKind !== 'type',
+        ),
         node.source,
         ...node.attributes,
       ]
@@ -197,6 +266,39 @@ export function transplat(code: string) {
         return
       }
 
+      const tokenToRemove = new Set<SyntaxKind>()
+      if (node.override) {
+        tokenToRemove.add(SyntaxKind.OverrideKeyword)
+      }
+      if (node.optional) {
+        tokenToRemove.add(SyntaxKind.QuestionToken)
+      }
+      if (node.readonly) {
+        tokenToRemove.add(SyntaxKind.ReadonlyKeyword)
+      }
+      if (node.static) {
+        tokenToRemove.add(SyntaxKind.StaticKeyword)
+      }
+      if (node.definite) {
+        tokenToRemove.add(SyntaxKind.ExclamationToken)
+      }
+      if (node.accessibility === 'private') {
+        tokenToRemove.add(SyntaxKind.PrivateKeyword)
+      }
+      if (node.accessibility === 'protected') {
+        tokenToRemove.add(SyntaxKind.ProtectedKeyword)
+      }
+      if (node.accessibility === 'public') {
+        tokenToRemove.add(SyntaxKind.PublicKeyword)
+      }
+
+      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+        if (tokenToRemove.has(token.kind)) {
+          tokenToRemove.delete(token.kind)
+          s.blank(node.start + token.start, node.start + token.end)
+        }
+      }
+
       return [
         ...node.decorators,
         node.key,
@@ -213,6 +315,33 @@ export function transplat(code: string) {
       ]
     },
     MethodDefinition: (node) => {
+      const tokenToRemove = new Set<SyntaxKind>()
+      if (node.override) {
+        tokenToRemove.add(SyntaxKind.OverrideKeyword)
+      }
+      if (node.optional) {
+        tokenToRemove.add(SyntaxKind.QuestionToken)
+      }
+      if (node.static) {
+        tokenToRemove.add(SyntaxKind.StaticKeyword)
+      }
+      if (node.accessibility === 'private') {
+        tokenToRemove.add(SyntaxKind.PrivateKeyword)
+      }
+      if (node.accessibility === 'protected') {
+        tokenToRemove.add(SyntaxKind.ProtectedKeyword)
+      }
+      if (node.accessibility === 'public') {
+        tokenToRemove.add(SyntaxKind.PublicKeyword)
+      }
+
+      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+        if (tokenToRemove.has(token.kind)) {
+          tokenToRemove.delete(token.kind)
+          s.blank(node.start + token.start, node.start + token.end)
+        }
+      }
+
       return [
         ...node.decorators,
         node.key,
@@ -225,11 +354,26 @@ export function transplat(code: string) {
       ...node.arguments,
     ],
     FunctionExpression: (node) => {
-      // const thisParam = node.params.find((param, index) =>
-      //   index === 0 && param.type === 'Identifier' && param.name === 'this')
-      // if (thisParam) {
-      //   s.blank(thisParam.start, thisParam.end)
-      // }
+      const thisParam = node.params.find((param, index) =>
+        index === 0 && param.type === 'Identifier' && param.name === 'this')
+      if (thisParam) {
+        // if exist `this` in the function body, remove it
+        s.blank(thisParam.start, thisParam.end)
+
+        // remove its follow ','
+        for (const token of walkTokens(s.getCurrent(thisParam.end, node.end))) {
+          // found ')'
+          if (token.kind === SyntaxKind.CloseParenToken) {
+            break
+          }
+
+          // found ','
+          if (token.kind === SyntaxKind.CommaToken) {
+            s.blank(thisParam.end + token.start, thisParam.end + token.end)
+            break
+          }
+        }
+      }
 
       return [
         node.id,
@@ -275,8 +419,7 @@ export function transplat(code: string) {
     ],
     ImportSpecifier: (node) => {
       if (node.importKind === 'type') {
-        s.blank(node.start, node.end)
-        return
+        throw new Error('Import type should be handled by `ImportDeclaration`')
       }
 
       return [
@@ -402,9 +545,8 @@ export function transplat(code: string) {
     TSEnumMember: null,
   })
 
-  for (const [start, end] of inlineRanges) {
-    // TODO: handle inline brackets
-  }
+  // for (const [start, end] of inlineRanges) {
+  // }
 
   return s.toString()
 }
