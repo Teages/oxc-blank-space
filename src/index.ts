@@ -11,10 +11,19 @@ export function test() {
 }
 
 const FunctionLikeExpression = new Set<string>([
+  // TODO: check if the list is correct
   'FunctionExpression',
   'MethodDefinition',
   'ArrowFunctionExpression',
   'FunctionDeclaration',
+] satisfies NodeType[])
+
+const StatementLikeNode = new Set<string>([
+  // TODO: check if the list is correct
+  'PropertyDefinition',
+  'VariableDeclarator',
+  'ExpressionStatement',
+  'ReturnStatement',
 ] satisfies NodeType[])
 
 export function transplat(code: string) {
@@ -302,7 +311,7 @@ export function transplat(code: string) {
         if (tokenToRemove.has(token.kind)) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
-          if (wantSemicolon) {
+          if (wantSemicolon && token.kind !== SyntaxKind.QuestionToken) {
             wantSemicolon = false
             s.replaceWith(node.start + token.start, node.start + token.start + 1, ';')
           }
@@ -350,7 +359,7 @@ export function transplat(code: string) {
         if (tokenToRemove.has(token.kind)) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
-          if (wantSemicolon) {
+          if (wantSemicolon && token.kind !== SyntaxKind.QuestionToken) {
             wantSemicolon = false
             s.replaceWith(node.start + token.start, node.start + token.start + 1, ';')
           }
@@ -470,9 +479,10 @@ export function transplat(code: string) {
       s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end),
     TSSatisfiesExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
-      if (parent && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+      if (parent && StatementLikeNode.has(parent.type) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
         s.replaceWith(node.expression.end, node.expression.end + 1, ';')
       }
+
       return [node.expression]
     },
     TSTypeParameterDeclaration: (node, parent) => {
@@ -495,7 +505,8 @@ export function transplat(code: string) {
     TSIndexSignature: removeNodeInline,
     TSAsExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
-      if (parent && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+
+      if (parent && StatementLikeNode.has(parent.type) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
         s.replaceWith(node.expression.end, node.expression.end + 1, ';')
       }
 
