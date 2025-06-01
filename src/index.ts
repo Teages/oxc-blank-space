@@ -260,7 +260,7 @@ export function transplat(code: string) {
       node.object,
       node.property,
     ],
-    PropertyDefinition: (node) => {
+    PropertyDefinition: (node, parent) => {
       if (node.declare) {
         removeNodeBlock(node)
         return
@@ -276,9 +276,6 @@ export function transplat(code: string) {
       if (node.readonly) {
         tokenToRemove.add(SyntaxKind.ReadonlyKeyword)
       }
-      if (node.static) {
-        tokenToRemove.add(SyntaxKind.StaticKeyword)
-      }
       if (node.definite) {
         tokenToRemove.add(SyntaxKind.ExclamationToken)
       }
@@ -292,10 +289,16 @@ export function transplat(code: string) {
         tokenToRemove.add(SyntaxKind.PublicKeyword)
       }
 
+      let wantSemicolon = parent?.type === 'ClassBody' && !node.static && !node.decorators.length
       for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
         if (tokenToRemove.has(token.kind)) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
+          if (wantSemicolon) {
+            console.log('[debug]', SyntaxKind[token.kind])
+            wantSemicolon = false
+            s.replaceWith(node.start + token.start, node.start + token.start + 1, ';')
+          }
         }
       }
 
@@ -314,7 +317,7 @@ export function transplat(code: string) {
         node.value,
       ]
     },
-    MethodDefinition: (node) => {
+    MethodDefinition: (node, parent) => {
       const tokenToRemove = new Set<SyntaxKind>()
       if (node.override) {
         tokenToRemove.add(SyntaxKind.OverrideKeyword)
@@ -335,10 +338,15 @@ export function transplat(code: string) {
         tokenToRemove.add(SyntaxKind.PublicKeyword)
       }
 
+      let wantSemicolon = parent?.type === 'ClassBody' && !node.static && !node.decorators.length
       for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
         if (tokenToRemove.has(token.kind)) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
+          if (wantSemicolon) {
+            wantSemicolon = false
+            s.replaceWith(node.start + token.start, node.start + token.start + 1, ';')
+          }
         }
       }
 
@@ -453,16 +461,24 @@ export function transplat(code: string) {
     TSTypeAnnotation: removeNodeInline,
     TSNonNullExpression: node =>
       s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end),
-    TSSatisfiesExpression: (node) => {
-      s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end)
-
+    TSSatisfiesExpression: (node, parent) => {
+      s.blank(node.expression.end, node.end)
+      if (parent && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+        s.replaceWith(node.expression.end, node.expression.end + 1, ';')
+      }
       return [node.expression]
     },
     TSTypeParameterDeclaration: removeNodeInline,
     TSTypeParameterInstantiation: removeNodeInline,
     TSIndexSignature: removeNodeInline,
-    TSAsExpression: node =>
-      s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end),
+    TSAsExpression: (node, parent) => {
+      s.blank(node.expression.end, node.end)
+      if (parent && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+        s.replaceWith(node.expression.end, node.expression.end + 1, ';')
+      }
+
+      return [node.expression]
+    },
     TSInstantiationExpression: (node) => {
       s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end)
 

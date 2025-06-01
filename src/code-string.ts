@@ -19,6 +19,14 @@ export class CodeString {
     return this.original.slice(start, end)
   }
 
+  public getCurrentChar(index: number) {
+    return this.current[index]
+  }
+
+  public getOriginalChar(index: number) {
+    return this.original[index]
+  }
+
   public searchPrev(target: string, start: number) {
     const index = this.current.slice(0, start).lastIndexOf(target)
     if (index === -1) {
@@ -41,7 +49,16 @@ export class CodeString {
     const replaced = slice.split('').map((char) => {
       return CodeString.blankChars.includes(char) ? char : CodeString.blank
     }).join('')
-    this.current = this.current.slice(0, start) + replaced + this.current.slice(end)
+
+    this.replaceWith(start, end, replaced)
+  }
+
+  public replaceWith(start: number, end: number, content: string) {
+    if (content.length !== end - start) {
+      throw new Error('The content length should be the same as the range length')
+    }
+
+    this.current = this.current.slice(0, start) + content + this.current.slice(end)
   }
 
   public blankButStartWithSemicolon(start: number, end: number) {
