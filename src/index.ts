@@ -1,13 +1,21 @@
 import type { Node } from 'oxc-parser'
+import type { NodeType } from './walker'
 import { parseSync } from 'oxc-parser'
 import { SyntaxKind } from 'typescript'
 import { CodeString } from './code-string'
-import { walkTokens } from './token'
+import { firstToken, lastToken, walkTokens } from './token'
 import { walk } from './walker'
 
 export function test() {
   return 'works!'
 }
+
+const FunctionLikeExpression = new Set<string>([
+  'FunctionExpression',
+  'MethodDefinition',
+  'ArrowFunctionExpression',
+  'FunctionDeclaration',
+] satisfies NodeType[])
 
 export function transplat(code: string) {
   const ast = parseSync('code.ts', code)
@@ -18,30 +26,12 @@ export function transplat(code: string) {
   const s = new CodeString(code)
   const inlineRanges: [number, number][] = []
 
-  /**
-   * mark the node as inline, means we need to handle brackets
-   *
-   * For example:
-   * ```ts
-   * const a = (): <
-   * T
-   * > => {}
-   * ```
-   *
-   * after we remove `<T>`, we need to make the function work
-   *
-   * ```js
-   * const a = (
-   *
-   * ) => {}
-   * ```
-   */
   const removeNodeInline = (node: Node) => {
     inlineRanges.push([node.start, node.end])
     s.blank(node.start, node.end)
   }
 
-  // mark the node as block, means we need to
+  // mark the node as block, means we need to add a semicolon to keep the behavior
   const removeNodeBlock = (node: Node) => {
     s.blankButStartWithSemicolon(node.start, node.end)
   }
@@ -137,14 +127,32 @@ export function transplat(code: string) {
       ...node.params as Node[],
       node.returnType,
       node.body,
-    ] satisfies (Node | null | undefined)[],
-    EmptyStatement: null,
-    ArrowFunctionExpression: node => [
-      node.typeParameters,
-      ...node.params as Node[],
-      node.returnType,
-      node.body,
     ],
+    EmptyStatement: null,
+    ArrowFunctionExpression: (node) => {
+      if (node.returnType) {
+        removeNodeInline(node.returnType)
+
+        const prevToken = lastToken(s.getCurrent(node.start, node.returnType.start))
+
+        if (prevToken?.kind === SyntaxKind.CloseParenToken) {
+          const targetCloseParenPos = node.returnType.end
+          const closeParenPos = node.start + prevToken.start
+
+          if (s.isMultiLineInRange(closeParenPos, targetCloseParenPos)) {
+            s.replaceWith(targetCloseParenPos - 1, targetCloseParenPos, ')')
+            s.replaceWith(closeParenPos, closeParenPos + 1, ' ')
+          }
+        }
+      }
+
+      return [
+        node.typeParameters,
+        ...node.params as Node[],
+        // node.returnType, // we have already handled it
+        node.body,
+      ]
+    },
     Literal: null,
     TemplateLiteral: node => [
       ...node.quasis,
@@ -295,7 +303,6 @@ export function transplat(code: string) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
           if (wantSemicolon) {
-            console.log('[debug]', SyntaxKind[token.kind])
             wantSemicolon = false
             s.replaceWith(node.start + token.start, node.start + token.start + 1, ';')
           }
@@ -468,7 +475,22 @@ export function transplat(code: string) {
       }
       return [node.expression]
     },
-    TSTypeParameterDeclaration: removeNodeInline,
+    TSTypeParameterDeclaration: (node, parent) => {
+      removeNodeInline(node)
+
+      if (parent && FunctionLikeExpression.has(parent.type)) {
+        const nextToken = firstToken(s.getCurrent(node.end, parent.end))
+
+        if (nextToken?.kind === SyntaxKind.OpenParenToken) {
+          const targetOpenParenPos = node.start
+          const openParenPos = node.end + nextToken.start
+          if (s.isMultiLineInRange(targetOpenParenPos, openParenPos)) {
+            s.replaceWith(targetOpenParenPos, targetOpenParenPos + 1, '(')
+            s.replaceWith(openParenPos, openParenPos + 1, ' ')
+          }
+        }
+      }
+    },
     TSTypeParameterInstantiation: removeNodeInline,
     TSIndexSignature: removeNodeInline,
     TSAsExpression: (node, parent) => {

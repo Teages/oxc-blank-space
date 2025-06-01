@@ -27,6 +27,16 @@ export class CodeString {
     return this.original[index]
   }
 
+  public isMultiLineInRange(start: number, end: number) {
+    for (let i = start; i < end; i++) {
+      if (this.current[i] === '\n') {
+        return true
+      }
+    }
+
+    return false
+  }
+
   public searchPrev(target: string, start: number) {
     const index = this.current.slice(0, start).lastIndexOf(target)
     if (index === -1) {
