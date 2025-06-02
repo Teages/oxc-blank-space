@@ -25,7 +25,7 @@
     "dist"
   ],
   "engines": {
-    "node": "^20.17.0 || >=22.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "build": "unbuild",
