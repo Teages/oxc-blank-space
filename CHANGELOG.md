@@ -1,6 +1,19 @@
 # Changelog
 
 
+## v0.1.1
+
+[compare changes](https://github.com/Teages/oxc-blank-space/compare/v0.1.0...v0.1.1)
+
+### 🏡 Chore
+
+- Downgrade node engine version requirement to >=18.0.0 ([6586509](https://github.com/Teages/oxc-blank-space/commit/6586509))
+- Update readme ([3e8b8c5](https://github.com/Teages/oxc-blank-space/commit/3e8b8c5))
+
+### ❤️ Contributors
+
+- Teages ([@Teages](https://github.com/Teages))
+
 ## v0.1.0
 
 [compare changes](https://github.com/Teages/oxc-blank-space/compare/v0.0.1...v0.1.0)
