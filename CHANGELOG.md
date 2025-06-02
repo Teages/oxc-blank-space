@@ -1,6 +1,22 @@
 # Changelog
 
 
+## v0.1.0
+
+[compare changes](https://github.com/Teages/oxc-blank-space/compare/v0.0.1...v0.1.0)
+
+### 🩹 Fixes
+
+- ⚠️  Export typo ([d7684a1](https://github.com/Teages/oxc-blank-space/commit/d7684a1))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Export typo ([d7684a1](https://github.com/Teages/oxc-blank-space/commit/d7684a1))
+
+### ❤️ Contributors
+
+- Teages ([@Teages](https://github.com/Teages))
+
 ## v0.0.1
 
 
