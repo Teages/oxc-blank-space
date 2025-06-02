@@ -1,10 +1,10 @@
 import type { Node } from 'oxc-parser'
 import { parseSync } from 'oxc-parser'
 import { SyntaxKind } from 'typescript'
-import { isFunctionLikeExpression, isNode, isStatementLike } from './ast'
-import { CodeString } from './code-string'
-import { firstToken, lastToken, walkTokens } from './token'
-import { walk } from './walker'
+import { isFunctionLikeExpression, isNode, isStatementLike } from './utils/ast'
+import { CodeString } from './utils/code-string'
+import { firstToken, lastToken, walkTokens } from './utils/token'
+import { walk } from './utils/walker'
 
 export function transplat(code: string) {
   const ast = parseSync('code.ts', code)
