@@ -1,18 +1,18 @@
-import * as ts from 'typescript'
+import { createScanner, LanguageVariant, ScriptTarget, SyntaxKind } from 'typescript'
 
 export interface TokenWalkResult {
-  kind: ts.SyntaxKind
+  kind: SyntaxKind
   start: number
   end: number
 }
 
-const scanner = ts.createScanner(ts.ScriptTarget.ESNext, true, ts.LanguageVariant.Standard)
+const scanner = createScanner(ScriptTarget.ESNext, true, LanguageVariant.Standard)
 export function* walkTokens(code: string): Generator<TokenWalkResult> {
   scanner.setText(code)
   scanner.resetTokenState(0)
 
   scanner.scan() // skip first token
-  while (scanner.getToken() !== ts.SyntaxKind.EndOfFileToken) {
+  while (scanner.getToken() !== SyntaxKind.EndOfFileToken) {
     yield {
       kind: scanner.getToken(),
       start: scanner.getTokenStart(),
