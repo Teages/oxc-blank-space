@@ -24,9 +24,6 @@ export function transplat(code: string) {
   }
 
   walk(ast.program, {
-    // Program: node => node.body,
-
-    /** Search Nodes */
     VariableDeclaration: (node) => {
       if (node.declare) {
         removeNodeBlock(node)
@@ -34,7 +31,6 @@ export function transplat(code: string) {
       }
       return node.declarations
     },
-    // ExpressionStatement: node => node.expression,
     ClassDeclaration: (node) => {
       if (node.declare) {
         removeNodeBlock(node)
@@ -70,11 +66,6 @@ export function transplat(code: string) {
         node.body,
       ]
     },
-    // CallExpression: node => [
-    //   node.callee,
-    //   node.typeArguments,
-    //   ...node.arguments,
-    // ],
     VariableDeclarator: (node) => {
       if (node.definite) {
         for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
@@ -104,18 +95,6 @@ export function transplat(code: string) {
         node.typeAnnotation,
       ]
     },
-    // ClassBody: node => node.body,
-    // ParenthesizedExpression: node => node.expression,
-    // BlockStatement: node => node.body,
-    // UnaryExpression: node => node.argument,
-    // FunctionDeclaration: node => [
-    //   node.id,
-    //   node.typeParameters,
-    //   ...node.params as Node[],
-    //   node.returnType,
-    //   node.body,
-    // ],
-    // EmptyStatement: null,
     ArrowFunctionExpression: (node) => {
       if (node.returnType) {
         removeNodeInline(node.returnType)
@@ -141,26 +120,6 @@ export function transplat(code: string) {
       ]
     },
     Literal: null,
-    // TemplateLiteral: node => [
-    //   ...node.quasis,
-    //   ...node.expressions,
-    // ],
-    // ArrayExpression: node => node.elements,
-    // BinaryExpression: node => [
-    //   node.left,
-    //   node.right,
-    // ],
-    // ObjectPattern: node => [
-    //   ...node.properties,
-    //   node.typeAnnotation,
-    // ],
-    // LogicalExpression: node => [
-    //   node.left,
-    //   node.right,
-    // ],
-    // Decorator: node => [
-    //   node.expression,
-    // ],
     ExportNamedDeclaration: (node) => {
       if (node.exportKind === 'type') {
         removeNodeBlock(node)
@@ -248,13 +207,7 @@ export function transplat(code: string) {
         ...node.attributes,
       ]
     },
-    // ExportDefaultDeclaration: node => [
-    //   node.declaration,
-    // ],
-    // MemberExpression: node => [
-    //   node.object,
-    //   node.property,
-    // ],
+
     PropertyDefinition: (node, parent) => {
       if (node.declare) {
         removeNodeBlock(node)
@@ -303,12 +256,6 @@ export function transplat(code: string) {
         node.value,
       ]
     },
-    // AccessorProperty: node => [
-    //   ...node.decorators,
-    //   node.key,
-    //   node.typeAnnotation,
-    //   node.value,
-    // ],
     MethodDefinition: (node, parent) => {
       const tokenToRemove = new Set<SyntaxKind>()
       if (node.override) {
@@ -348,11 +295,7 @@ export function transplat(code: string) {
         node.value,
       ]
     },
-    // NewExpression: node => [
-    //   node.callee,
-    //   node.typeArguments,
-    //   ...node.arguments,
-    // ],
+
     FunctionExpression: (node) => {
       const thisParam = node.params.find((param, index) =>
         index === 0 && param.type === 'Identifier' && param.name === 'this')
@@ -383,40 +326,8 @@ export function transplat(code: string) {
         node.body,
       ]
     },
-    // AssignmentPattern: node => [
-    //   node.left,
-    //   node.right,
-    // ],
-    // ReturnStatement: node => [
-    //   node.argument,
-    // ],
-    // TemplateElement: null,
-    // IfStatement: node => [
-    //   node.test,
-    //   node.consequent,
-    //   node.alternate,
-    // ],
-    // Property: node => [
-    //   node.key,
-    //   node.value,
-    // ],
-    // ObjectExpression: node => node.properties,
-    // ClassExpression: node => [
-    //   ...node.decorators,
-    //   node.id,
-    //   node.typeParameters,
-    //   node.superClass,
-    //   node.superTypeArguments,
-    //   node.body,
-    // ],
-    // TaggedTemplateExpression: node => [
-    //   node.tag,
-    //   node.typeArguments,
-    //   node.quasi,
-    // ],
-    // ImportDefaultSpecifier: node => [
-    //   node.local,
-    // ],
+
+    // remove type import
     ImportSpecifier: (node) => {
       if (node.importKind === 'type') {
         throw new Error('Import type should be handled by `ImportDeclaration`')
@@ -427,6 +338,8 @@ export function transplat(code: string) {
         node.local,
       ]
     },
+
+    // remove type export
     ExportSpecifier: (node) => {
       if (node.exportKind === 'type') {
         removeNodeInline(node)
@@ -438,38 +351,55 @@ export function transplat(code: string) {
         node.exported,
       ]
     },
-    // RestElement: node => [
-    //   node.argument,
-    //   node.typeAnnotation,
-    // ],
-    // YieldExpression: node => [
-    //   node.argument,
-    // ],
-    // ThrowStatement: node => [
-    //   node.argument,
-    // ],
-    // SequenceExpression: node => [
-    //   ...node.expressions,
-    // ],
 
-    /** TypeScript Syntax */
+    /** TypeScript Syntax, can be simply erased */
     TSTypeAnnotation: removeNodeInline,
-    TSNonNullExpression: node =>
-      s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end),
+    TSTypeParameterInstantiation: removeNodeInline,
+    TSIndexSignature: removeNodeInline,
+    TSAbstractPropertyDefinition: removeNodeBlock, // it's a inline node, but we need to add a semicolon
+    TSAbstractMethodDefinition: removeNodeInline,
+    TSDeclareFunction: removeNodeBlock,
+    TSInterfaceDeclaration: removeNodeBlock,
+    TSTypeAliasDeclaration: removeNodeBlock,
+    TSModuleDeclaration: removeNodeBlock,
+
+    // remove the `!` in the expression
+    TSNonNullExpression: (node) => {
+      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+        if (token.kind === SyntaxKind.ExclamationToken) {
+          s.blank(node.start + token.start, node.start + token.end)
+          break
+        }
+      }
+    },
+
+    // `some satisfies Type` -> `some`
     TSSatisfiesExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
       if (parent && isStatementLike(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
         s.replaceWith(node.expression.end, node.expression.end + 1, ';')
       }
-
       return [node.expression]
     },
+
+    // `some as Type` -> `some`
+    TSAsExpression: (node, parent) => {
+      s.blank(node.expression.end, node.end)
+      if (parent && isStatementLike(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+        s.replaceWith(node.expression.end, node.expression.end + 1, ';')
+      }
+      return [node.expression]
+    },
+
+    // `function foo<T>() {}` -> `function foo   () {}`
+    // `<T>() => {}` -> `   () => {}`
     TSTypeParameterDeclaration: (node, parent) => {
       removeNodeInline(node)
 
       if (parent && isFunctionLikeExpression(parent)) {
         const nextToken = firstToken(s.getCurrent(node.end, parent.end))
 
+        // we need to move the `(` to keep the behavior
         if (nextToken?.kind === SyntaxKind.OpenParenToken) {
           const targetOpenParenPos = node.start
           const openParenPos = node.end + nextToken.start
@@ -480,27 +410,6 @@ export function transplat(code: string) {
         }
       }
     },
-    TSTypeParameterInstantiation: removeNodeInline,
-    TSIndexSignature: removeNodeInline,
-    TSAsExpression: (node, parent) => {
-      s.blank(node.expression.end, node.end)
-
-      if (parent && isStatementLike(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
-        s.replaceWith(node.expression.end, node.expression.end + 1, ';')
-      }
-
-      return [node.expression]
-    },
-    // TSInstantiationExpression: (node) => [
-    //   node.expression,
-    //   node.typeArguments,
-    // ],
-    TSAbstractPropertyDefinition: removeNodeBlock, // it's a inline node, but we need to add a semicolon
-    TSAbstractMethodDefinition: removeNodeInline,
-    TSDeclareFunction: removeNodeBlock,
-    TSInterfaceDeclaration: removeNodeBlock,
-    TSTypeAliasDeclaration: removeNodeBlock,
-    TSModuleDeclaration: removeNodeBlock,
 
     /**
      * Enum
