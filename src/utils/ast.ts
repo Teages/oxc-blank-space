@@ -63,12 +63,8 @@ export function isStatement(node: Node): node is Statement {
 }
 
 export function isNode(target: unknown): target is Node {
-  return typeof target === 'object'
-    && target !== null
-    && 'type' in target
-    && typeof target.type === 'string'
-    && 'start' in target
-    && typeof target.start === 'number'
-    && 'end' in target
-    && typeof target.end === 'number'
+  return typeof target === 'object' && target !== null
+    && 'type' in target && typeof target.type === 'string'
+    && 'start' in target && typeof target.start === 'number'
+    && 'end' in target && typeof target.end === 'number'
 }

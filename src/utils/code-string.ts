@@ -1,7 +1,8 @@
 export class CodeString {
-  public original: string
-  public current: string
-  public pending: { start: number, end: number, content: string }[] = []
+  private original: string
+  private current: string
+
+  private pending: { start: number, end: number, content: string }[] = []
 
   private static blankChars: string[] = [' ', '\t', '\n', '\r']
   private static blank = ' '
@@ -11,16 +12,8 @@ export class CodeString {
     this.current = code
   }
 
-  public getCurrent(start: number, end: number) {
-    return this.current.slice(start, end)
-  }
-
   public getOriginal(start: number, end: number) {
     return this.original.slice(start, end)
-  }
-
-  public getCurrentChar(index: number) {
-    return this.current[index]
   }
 
   public getOriginalChar(index: number) {
@@ -29,7 +22,7 @@ export class CodeString {
 
   public isMultiLineInRange(start: number, end: number) {
     for (let i = start; i < end; i++) {
-      if (this.current[i] === '\n') {
+      if (this.original[i] === '\n') {
         return true
       }
     }
@@ -37,20 +30,16 @@ export class CodeString {
     return false
   }
 
-  public searchPrev(target: string, start: number) {
-    const index = this.current.slice(0, start).lastIndexOf(target)
-    if (index === -1) {
-      return null
-    }
-
-    return index
+  public overwriteDanger(start: number, end: number, content: string) {
+    this.pending.push({ start, end, content })
   }
 
-  public searchNext(target: string, start: number) {
-    const index = this.current.slice(start).indexOf(target)
-    if (index === -1) {
-      return null
+  public override(start: number, end: number, content: string) {
+    if (content.length !== end - start) {
+      throw new Error('The content length should be the same as the range length')
     }
+
+    this.current = this.current.slice(0, start) + content + this.current.slice(end)
   }
 
   /** replace the content to the blank char */
@@ -60,44 +49,20 @@ export class CodeString {
       return CodeString.blankChars.includes(char) ? char : CodeString.blank
     }).join('')
 
-    this.replaceWith(start, end, replaced)
-  }
-
-  public replaceWith(start: number, end: number, content: string) {
-    if (content.length !== end - start) {
-      throw new Error('The content length should be the same as the range length')
-    }
-
-    this.current = this.current.slice(0, start) + content + this.current.slice(end)
+    this.override(start, end, replaced)
   }
 
   public blankButStartWithSemicolon(start: number, end: number) {
-    this.blank(start, end)
-    // make the first char to be a semicolon
-    this.current = `${this.current.slice(0, start)};${this.current.slice(start + 1)}`
-  }
+    const slice = this.current.slice(start, end)
+    const replaced = slice.split('').map((char, index) => {
+      if (index === 0) {
+        return ';'
+      }
 
-  /** rollback the content to the original */
-  public rollback(start: number, end: number) {
-    this.current = this.current.slice(0, start) + this.original.slice(start, end) + this.current.slice(end)
-  }
+      return CodeString.blankChars.includes(char) ? char : CodeString.blank
+    }).join('')
 
-  /** remove the content, but don't touch the specific */
-  public removeButKeep(start: number, end: number, keepStart: number, keepEnd: number) {
-    // Remove content before the keep range
-    if (start < keepStart) {
-      this.blank(start, keepStart)
-    }
-
-    // Remove content after the keep range
-    if (keepEnd < end) {
-      this.blank(keepEnd, end)
-    }
-  }
-
-  /** add a pending overwrite, with the content will be applied in the end */
-  public overwrite(start: number, end: number, content: string) {
-    this.pending.push({ start, end, content })
+    this.override(start, end, replaced)
   }
 
   /** get the result */

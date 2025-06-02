@@ -50,7 +50,7 @@ export function transplat(code: string) {
         tokenToRemove.add(SyntaxKind.AbstractKeyword)
       }
 
-      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+      for (const token of walkTokens(s.getOriginal(node.start, node.end))) {
         if (tokenToRemove.has(token.kind)) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
@@ -68,7 +68,7 @@ export function transplat(code: string) {
     },
     VariableDeclarator: (node) => {
       if (node.definite) {
-        for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+        for (const token of walkTokens(s.getOriginal(node.start, node.end))) {
           if (token.kind === SyntaxKind.ExclamationToken) {
             s.blank(node.start + token.start, node.start + token.end)
             break
@@ -83,7 +83,7 @@ export function transplat(code: string) {
     },
     Identifier: (node) => {
       if (node.optional as boolean) { // FIXME: oxc-parser type is not correct
-        for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+        for (const token of walkTokens(s.getOriginal(node.start, node.end))) {
           if (token.kind === SyntaxKind.QuestionToken) {
             s.blank(node.start + token.start, node.start + token.end)
             break
@@ -99,15 +99,15 @@ export function transplat(code: string) {
       if (node.returnType) {
         removeNodeInline(node.returnType)
 
-        const prevToken = lastToken(s.getCurrent(node.start, node.returnType.start))
+        const prevToken = lastToken(s.getOriginal(node.start, node.returnType.start))
 
         if (prevToken?.kind === SyntaxKind.CloseParenToken) {
           const targetCloseParenPos = node.returnType.end
           const closeParenPos = node.start + prevToken.start
 
           if (s.isMultiLineInRange(closeParenPos, targetCloseParenPos)) {
-            s.replaceWith(targetCloseParenPos - 1, targetCloseParenPos, ')')
-            s.replaceWith(closeParenPos, closeParenPos + 1, ' ')
+            s.override(targetCloseParenPos - 1, targetCloseParenPos, ')')
+            s.override(closeParenPos, closeParenPos + 1, ' ')
           }
         }
       }
@@ -136,7 +136,7 @@ export function transplat(code: string) {
           removeNodeInline(specifier)
           // remove its follow ','
 
-          for (const token of walkTokens(s.getCurrent(specifier.end, node.end))) {
+          for (const token of walkTokens(s.getOriginal(specifier.end, node.end))) {
             // found '}'
             if (token.kind === SyntaxKind.CloseParenToken) {
               break
@@ -171,7 +171,7 @@ export function transplat(code: string) {
           removeNodeInline(specifier)
           // remove its follow ','
 
-          for (const token of walkTokens(s.getCurrent(specifier.end, node.end))) {
+          for (const token of walkTokens(s.getOriginal(specifier.end, node.end))) {
             // found '}'
             if (token.kind === SyntaxKind.CloseParenToken) {
               break
@@ -238,13 +238,13 @@ export function transplat(code: string) {
       }
 
       let wantSemicolon = parent?.type === 'ClassBody' && !node.static && !node.decorators.length
-      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+      for (const token of walkTokens(s.getOriginal(node.start, node.end))) {
         if (tokenToRemove.has(token.kind)) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
           if (wantSemicolon && token.kind !== SyntaxKind.QuestionToken) {
             wantSemicolon = false
-            s.replaceWith(node.start + token.start, node.start + token.start + 1, ';')
+            s.override(node.start + token.start, node.start + token.start + 1, ';')
           }
         }
       }
@@ -278,13 +278,13 @@ export function transplat(code: string) {
       }
 
       let wantSemicolon = parent?.type === 'ClassBody' && !node.static && !node.decorators.length
-      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+      for (const token of walkTokens(s.getOriginal(node.start, node.end))) {
         if (tokenToRemove.has(token.kind)) {
           tokenToRemove.delete(token.kind)
           s.blank(node.start + token.start, node.start + token.end)
           if (wantSemicolon && token.kind !== SyntaxKind.QuestionToken) {
             wantSemicolon = false
-            s.replaceWith(node.start + token.start, node.start + token.start + 1, ';')
+            s.override(node.start + token.start, node.start + token.start + 1, ';')
           }
         }
       }
@@ -304,7 +304,7 @@ export function transplat(code: string) {
         s.blank(thisParam.start, thisParam.end)
 
         // remove its follow ','
-        for (const token of walkTokens(s.getCurrent(thisParam.end, node.end))) {
+        for (const token of walkTokens(s.getOriginal(thisParam.end, node.end))) {
           // found ')'
           if (token.kind === SyntaxKind.CloseParenToken) {
             break
@@ -365,7 +365,7 @@ export function transplat(code: string) {
 
     // remove the `!` in the expression
     TSNonNullExpression: (node) => {
-      for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
+      for (const token of walkTokens(s.getOriginal(node.start, node.end))) {
         if (token.kind === SyntaxKind.ExclamationToken) {
           s.blank(node.start + token.start, node.start + token.end)
           break
@@ -377,7 +377,7 @@ export function transplat(code: string) {
     TSSatisfiesExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
       if (parent && isStatementLike(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
-        s.replaceWith(node.expression.end, node.expression.end + 1, ';')
+        s.override(node.expression.end, node.expression.end + 1, ';')
       }
       return [node.expression]
     },
@@ -386,7 +386,7 @@ export function transplat(code: string) {
     TSAsExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
       if (parent && isStatementLike(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
-        s.replaceWith(node.expression.end, node.expression.end + 1, ';')
+        s.override(node.expression.end, node.expression.end + 1, ';')
       }
       return [node.expression]
     },
@@ -397,15 +397,15 @@ export function transplat(code: string) {
       removeNodeInline(node)
 
       if (parent && isFunctionLikeExpression(parent)) {
-        const nextToken = firstToken(s.getCurrent(node.end, parent.end))
+        const nextToken = firstToken(s.getOriginal(node.end, parent.end))
 
         // we need to move the `(` to keep the behavior
         if (nextToken?.kind === SyntaxKind.OpenParenToken) {
           const targetOpenParenPos = node.start
           const openParenPos = node.end + nextToken.start
           if (s.isMultiLineInRange(targetOpenParenPos, openParenPos)) {
-            s.replaceWith(targetOpenParenPos, targetOpenParenPos + 1, '(')
-            s.replaceWith(openParenPos, openParenPos + 1, ' ')
+            s.override(targetOpenParenPos, targetOpenParenPos + 1, '(')
+            s.override(openParenPos, openParenPos + 1, ' ')
           }
         }
       }
@@ -439,9 +439,9 @@ export function transplat(code: string) {
       }
 
       const enumName = node.id.name
-      s.overwrite(node.start, node.start + 4, `var `)
-      s.overwrite(node.id.start, node.id.end, `${enumName}; (function (${enumName})`)
-      s.overwrite(node.end, node.end, `)(${enumName} || (${enumName} = {}));`)
+      s.overwriteDanger(node.start, node.start + 4, `var `)
+      s.overwriteDanger(node.id.start, node.id.end, `${enumName}; (function (${enumName})`)
+      s.overwriteDanger(node.end, node.end, `)(${enumName} || (${enumName} = {}));`)
 
       let lastValue = -1
       for (const member of node.body.members) {
@@ -476,13 +476,13 @@ export function transplat(code: string) {
         const assignment = `${enumName}[${enumName}["${memberName}"] = ${lastValue}] = "${memberName}"`
 
         // try to find the next `,` and remove it
-        const nextToken = firstToken(s.getCurrent(member.end, node.end))
+        const nextToken = firstToken(s.getOriginal(member.end, node.end))
         const hasComma = nextToken?.kind === SyntaxKind.CommaToken
         if (hasComma) {
-          s.overwrite(member.end + nextToken.start, member.end + nextToken.end, ';')
+          s.overwriteDanger(member.end + nextToken.start, member.end + nextToken.end, ';')
         }
 
-        s.overwrite(member.start, member.end, assignment)
+        s.overwriteDanger(member.start, member.end, assignment)
       }
       return undefined
     },
