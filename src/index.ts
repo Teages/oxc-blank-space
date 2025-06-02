@@ -1,59 +1,10 @@
-import type { Node, Statement } from 'oxc-parser'
+import type { Node } from 'oxc-parser'
 import { parseSync } from 'oxc-parser'
 import { SyntaxKind } from 'typescript'
+import { isFunctionLikeExpression, isNode, isStatementLike } from './ast'
 import { CodeString } from './code-string'
 import { firstToken, lastToken, walkTokens } from './token'
 import { walk } from './walker'
-
-function isFunctionLikeExpression(node: Node): boolean {
-  return node.type === 'ArrowFunctionExpression'
-    || node.type === 'FunctionDeclaration'
-    || node.type === 'MethodDefinition'
-    || node.type === 'FunctionExpression'
-}
-
-function isStatement(node: Node): node is Statement {
-  return node.type === 'BlockStatement'
-    || node.type === 'BreakStatement'
-    || node.type === 'ContinueStatement'
-    || node.type === 'DebuggerStatement'
-    || node.type === 'DoWhileStatement'
-    || node.type === 'EmptyStatement'
-    || node.type === 'ExpressionStatement'
-    || node.type === 'ForInStatement'
-    || node.type === 'ForOfStatement'
-    || node.type === 'ForStatement'
-    || node.type === 'IfStatement'
-    || node.type === 'LabeledStatement'
-    || node.type === 'ReturnStatement'
-    || node.type === 'SwitchStatement'
-    || node.type === 'ThrowStatement'
-    || node.type === 'TryStatement'
-    || node.type === 'WhileStatement'
-    || node.type === 'WithStatement'
-
-    // Declaration
-    || node.type === 'VariableDeclaration'
-    || node.type === 'FunctionDeclaration'
-    || node.type === 'FunctionExpression'
-    || node.type === 'TSDeclareFunction'
-    || node.type === 'TSEmptyBodyFunctionExpression'
-    || node.type === 'ClassDeclaration'
-    || node.type === 'ClassExpression'
-    || node.type === 'TSTypeAliasDeclaration'
-    || node.type === 'TSInterfaceDeclaration'
-    || node.type === 'TSEnumDeclaration'
-    || node.type === 'TSModuleDeclaration'
-    || node.type === 'TSImportEqualsDeclaration'
-
-    // ModuleDeclaration
-    || node.type === 'ImportDeclaration'
-    || node.type === 'ExportAllDeclaration'
-    || node.type === 'ExportDefaultDeclaration'
-    || node.type === 'ExportNamedDeclaration'
-    || node.type === 'TSExportAssignment'
-    || node.type === 'TSNamespaceExportDeclaration'
-}
 
 export function transplat(code: string) {
   const ast = parseSync('code.ts', code)
@@ -73,7 +24,7 @@ export function transplat(code: string) {
   }
 
   walk(ast.program, {
-    Program: node => node.body,
+    // Program: node => node.body,
 
     /** Search Nodes */
     VariableDeclaration: (node) => {
@@ -83,7 +34,7 @@ export function transplat(code: string) {
       }
       return node.declarations
     },
-    ExpressionStatement: node => node.expression,
+    // ExpressionStatement: node => node.expression,
     ClassDeclaration: (node) => {
       if (node.declare) {
         removeNodeBlock(node)
@@ -119,11 +70,11 @@ export function transplat(code: string) {
         node.body,
       ]
     },
-    CallExpression: node => [
-      node.callee,
-      node.typeArguments,
-      ...node.arguments,
-    ],
+    // CallExpression: node => [
+    //   node.callee,
+    //   node.typeArguments,
+    //   ...node.arguments,
+    // ],
     VariableDeclarator: (node) => {
       if (node.definite) {
         for (const token of walkTokens(s.getCurrent(node.start, node.end))) {
@@ -153,18 +104,18 @@ export function transplat(code: string) {
         node.typeAnnotation,
       ]
     },
-    ClassBody: node => node.body,
-    ParenthesizedExpression: node => node.expression,
-    BlockStatement: node => node.body,
-    UnaryExpression: node => node.argument,
-    FunctionDeclaration: node => [
-      node.id,
-      node.typeParameters,
-      ...node.params as Node[],
-      node.returnType,
-      node.body,
-    ],
-    EmptyStatement: null,
+    // ClassBody: node => node.body,
+    // ParenthesizedExpression: node => node.expression,
+    // BlockStatement: node => node.body,
+    // UnaryExpression: node => node.argument,
+    // FunctionDeclaration: node => [
+    //   node.id,
+    //   node.typeParameters,
+    //   ...node.params as Node[],
+    //   node.returnType,
+    //   node.body,
+    // ],
+    // EmptyStatement: null,
     ArrowFunctionExpression: (node) => {
       if (node.returnType) {
         removeNodeInline(node.returnType)
@@ -190,26 +141,26 @@ export function transplat(code: string) {
       ]
     },
     Literal: null,
-    TemplateLiteral: node => [
-      ...node.quasis,
-      ...node.expressions,
-    ],
-    ArrayExpression: node => node.elements,
-    BinaryExpression: node => [
-      node.left,
-      node.right,
-    ],
-    ObjectPattern: node => [
-      ...node.properties,
-      node.typeAnnotation,
-    ],
-    LogicalExpression: node => [
-      node.left,
-      node.right,
-    ],
-    Decorator: node => [
-      node.expression,
-    ],
+    // TemplateLiteral: node => [
+    //   ...node.quasis,
+    //   ...node.expressions,
+    // ],
+    // ArrayExpression: node => node.elements,
+    // BinaryExpression: node => [
+    //   node.left,
+    //   node.right,
+    // ],
+    // ObjectPattern: node => [
+    //   ...node.properties,
+    //   node.typeAnnotation,
+    // ],
+    // LogicalExpression: node => [
+    //   node.left,
+    //   node.right,
+    // ],
+    // Decorator: node => [
+    //   node.expression,
+    // ],
     ExportNamedDeclaration: (node) => {
       if (node.exportKind === 'type') {
         removeNodeBlock(node)
@@ -297,13 +248,13 @@ export function transplat(code: string) {
         ...node.attributes,
       ]
     },
-    ExportDefaultDeclaration: node => [
-      node.declaration,
-    ],
-    MemberExpression: node => [
-      node.object,
-      node.property,
-    ],
+    // ExportDefaultDeclaration: node => [
+    //   node.declaration,
+    // ],
+    // MemberExpression: node => [
+    //   node.object,
+    //   node.property,
+    // ],
     PropertyDefinition: (node, parent) => {
       if (node.declare) {
         removeNodeBlock(node)
@@ -352,12 +303,12 @@ export function transplat(code: string) {
         node.value,
       ]
     },
-    AccessorProperty: node => [
-      ...node.decorators,
-      node.key,
-      node.typeAnnotation,
-      node.value,
-    ],
+    // AccessorProperty: node => [
+    //   ...node.decorators,
+    //   node.key,
+    //   node.typeAnnotation,
+    //   node.value,
+    // ],
     MethodDefinition: (node, parent) => {
       const tokenToRemove = new Set<SyntaxKind>()
       if (node.override) {
@@ -397,11 +348,11 @@ export function transplat(code: string) {
         node.value,
       ]
     },
-    NewExpression: node => [
-      node.callee,
-      node.typeArguments,
-      ...node.arguments,
-    ],
+    // NewExpression: node => [
+    //   node.callee,
+    //   node.typeArguments,
+    //   ...node.arguments,
+    // ],
     FunctionExpression: (node) => {
       const thisParam = node.params.find((param, index) =>
         index === 0 && param.type === 'Identifier' && param.name === 'this')
@@ -432,40 +383,40 @@ export function transplat(code: string) {
         node.body,
       ]
     },
-    AssignmentPattern: node => [
-      node.left,
-      node.right,
-    ],
-    ReturnStatement: node => [
-      node.argument,
-    ],
-    TemplateElement: null,
-    IfStatement: node => [
-      node.test,
-      node.consequent,
-      node.alternate,
-    ],
-    Property: node => [
-      node.key,
-      node.value,
-    ],
-    ObjectExpression: node => node.properties,
-    ClassExpression: node => [
-      ...node.decorators,
-      node.id,
-      node.typeParameters,
-      node.superClass,
-      node.superTypeArguments,
-      node.body,
-    ],
-    TaggedTemplateExpression: node => [
-      node.tag,
-      node.typeArguments,
-      node.quasi,
-    ],
-    ImportDefaultSpecifier: node => [
-      node.local,
-    ],
+    // AssignmentPattern: node => [
+    //   node.left,
+    //   node.right,
+    // ],
+    // ReturnStatement: node => [
+    //   node.argument,
+    // ],
+    // TemplateElement: null,
+    // IfStatement: node => [
+    //   node.test,
+    //   node.consequent,
+    //   node.alternate,
+    // ],
+    // Property: node => [
+    //   node.key,
+    //   node.value,
+    // ],
+    // ObjectExpression: node => node.properties,
+    // ClassExpression: node => [
+    //   ...node.decorators,
+    //   node.id,
+    //   node.typeParameters,
+    //   node.superClass,
+    //   node.superTypeArguments,
+    //   node.body,
+    // ],
+    // TaggedTemplateExpression: node => [
+    //   node.tag,
+    //   node.typeArguments,
+    //   node.quasi,
+    // ],
+    // ImportDefaultSpecifier: node => [
+    //   node.local,
+    // ],
     ImportSpecifier: (node) => {
       if (node.importKind === 'type') {
         throw new Error('Import type should be handled by `ImportDeclaration`')
@@ -487,19 +438,19 @@ export function transplat(code: string) {
         node.exported,
       ]
     },
-    RestElement: node => [
-      node.argument,
-      node.typeAnnotation,
-    ],
-    YieldExpression: node => [
-      node.argument,
-    ],
-    ThrowStatement: node => [
-      node.argument,
-    ],
-    SequenceExpression: node => [
-      ...node.expressions,
-    ],
+    // RestElement: node => [
+    //   node.argument,
+    //   node.typeAnnotation,
+    // ],
+    // YieldExpression: node => [
+    //   node.argument,
+    // ],
+    // ThrowStatement: node => [
+    //   node.argument,
+    // ],
+    // SequenceExpression: node => [
+    //   ...node.expressions,
+    // ],
 
     /** TypeScript Syntax */
     TSTypeAnnotation: removeNodeInline,
@@ -507,7 +458,7 @@ export function transplat(code: string) {
       s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end),
     TSSatisfiesExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
-      if (parent && isStatement(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+      if (parent && isStatementLike(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
         s.replaceWith(node.expression.end, node.expression.end + 1, ';')
       }
 
@@ -534,17 +485,16 @@ export function transplat(code: string) {
     TSAsExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
 
-      if (parent && isStatement(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+      if (parent && isStatementLike(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
         s.replaceWith(node.expression.end, node.expression.end + 1, ';')
       }
 
       return [node.expression]
     },
-    TSInstantiationExpression: (node) => {
-      s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end)
-
-      return [node.expression]
-    },
+    // TSInstantiationExpression: (node) => [
+    //   node.expression,
+    //   node.typeArguments,
+    // ],
     TSAbstractPropertyDefinition: removeNodeBlock, // it's a inline node, but we need to add a semicolon
     TSAbstractMethodDefinition: removeNodeInline,
     TSDeclareFunction: removeNodeBlock,
@@ -629,6 +579,18 @@ export function transplat(code: string) {
     },
     TSEnumBody: null,
     TSEnumMember: null,
+  }, (node) => {
+    const childNodes: Node[] = []
+    const pushNode = (node: unknown) => isNode(node) && childNodes.push(node)
+    const pushNodes = (node: unknown) => Array.isArray(node)
+      ? node.forEach(node => pushNode(node))
+      : pushNode(node)
+
+    for (const key in node) {
+      pushNodes(node[key as keyof typeof node])
+    }
+
+    return childNodes
   })
 
   return s.toString()

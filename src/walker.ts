@@ -8,22 +8,30 @@ export type WalkerCallbacks = {
 
 const warned = new Set<string>()
 
-export function walk(node: Node, callbacks: WalkerCallbacks) {
-  _walk(null, node, callbacks)
+export function walk(node: Node, callbacks: WalkerCallbacks, unknownNodeHandler: CallbackOf<NodeType>) {
+  _walk(null, node, callbacks, unknownNodeHandler)
 }
 
-function _walk(parent: Node | null, node: Node, callbacks: WalkerCallbacks) {
+function _walk(parent: Node | null, node: Node, callbacks: WalkerCallbacks, unknownNodeHandler: CallbackOf<NodeType>) {
   if (!node.type) {
     return
   }
 
-  const callback = callbacks[node.type] as ((node: Node, parent: Node | null) => (Node | null | undefined)[] | Node | null | undefined) | null | undefined
+  const callback = callbacks[node.type] as CallbackOf<NodeType>
 
   if (!callback) {
     if (callback === undefined && !warned.has(node.type)) {
-      // FIXME: I am lazy so I just writing handler for node type listed in the test cases
-      console.warn(`No callback found for node type: ${node.type}`)
-      warned.add(node.type)
+      const children = unknownNodeHandler(node, parent)
+      if (Array.isArray(children)) {
+        for (const child of children) {
+          if (child) {
+            _walk(node, child, callbacks, unknownNodeHandler)
+          }
+        }
+      }
+      else if (children) {
+        _walk(node, children, callbacks, unknownNodeHandler)
+      }
     }
     return
   }
@@ -32,11 +40,11 @@ function _walk(parent: Node | null, node: Node, callbacks: WalkerCallbacks) {
   if (Array.isArray(children)) {
     for (const child of children) {
       if (child) {
-        _walk(node, child, callbacks)
+        _walk(node, child, callbacks, unknownNodeHandler)
       }
     }
   }
   else if (children) {
-    _walk(node, children, callbacks)
+    _walk(node, children, callbacks, unknownNodeHandler)
   }
 }
