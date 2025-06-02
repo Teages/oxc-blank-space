@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
-import { transplat } from '../src/index'
+import { transpile } from '../src/index'
 
-console.log(transplat(`
+console.log(transpile(`
 
 
 // ^^^^^^^^^^^^^^^ empty namespace

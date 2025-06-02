@@ -6,7 +6,7 @@ import { CodeString } from './utils/code-string'
 import { firstToken, lastToken, walkTokens } from './utils/token'
 import { walk } from './utils/walker'
 
-export function transplat(code: string) {
+export function transpile(code: string) {
   const ast = parseSync('code.ts', code)
   if (ast.errors.length) {
     throw new Error('Failed to parse code', { cause: ast.errors })

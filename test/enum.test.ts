@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { transplat } from '../src'
+import { transpile } from '../src'
 
 describe('enum', () => {
   it('works', () => {
-    expect(transplat(`
+    expect(transpile(`
       enum Foo {
         BAR = 'bar',
         BAZ = 'baz',
@@ -17,7 +17,7 @@ describe('enum', () => {
           "
     `)
 
-    expect(transplat(`
+    expect(transpile(`
       enum Foo {
         BAR,
         BAZ,
@@ -31,7 +31,7 @@ describe('enum', () => {
           "
     `)
 
-    expect(transplat(`
+    expect(transpile(`
       enum A {
         X,
         "!X",
@@ -49,7 +49,7 @@ describe('enum', () => {
           "
     `)
 
-    expect(transplat(`
+    expect(transpile(`
       enum A { B, C }
     `)).toMatchInlineSnapshot(`
       "
@@ -57,7 +57,7 @@ describe('enum', () => {
           "
     `)
 
-    expect(transplat(`
+    expect(transpile(`
       enum A { B,
       C }
     `)).toMatchInlineSnapshot(`
@@ -67,7 +67,7 @@ describe('enum', () => {
           "
     `)
 
-    expect(transplat(`
+    expect(transpile(`
       /**/enum/**/Foo/**/{/**/
         /**/BAR/**/,/**/
         /**/BAZ/**/,/**/

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { transplat } from '../src'
+import { transpile } from '../src'
 
 describe('typeScript transpilation', () => {
   const srcDir = path.join(__dirname, 'fixture/src')
@@ -25,7 +25,7 @@ describe('typeScript transpilation', () => {
       const expected = fs.readFileSync(expectedPath, 'utf-8')
 
       // Transpile the source
-      const result = transplat(source)
+      const result = transpile(source)
 
       // write to dist for debugging
       fs.writeFileSync(path.join(distDir, file.replace('.ts', '.js')), result)
