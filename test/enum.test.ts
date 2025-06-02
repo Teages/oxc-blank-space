@@ -11,8 +11,8 @@ describe('enum', () => {
     `)).toMatchInlineSnapshot(`
       "
             var  Foo; (function (Foo) {
-              Foo[Foo["BAR"] = 0] = "BAR";,
-              Foo[Foo["BAZ"] = 1] = "BAZ";,
+              Foo[Foo["BAR"] = 0] = "BAR";
+              Foo[Foo["BAZ"] = 1] = "BAZ";
             })(Foo || (Foo = {}));
           "
     `)
@@ -25,8 +25,8 @@ describe('enum', () => {
     `)).toMatchInlineSnapshot(`
       "
             var  Foo; (function (Foo) {
-              Foo[Foo["BAR"] = 0] = "BAR";,
-              Foo[Foo["BAZ"] = 1] = "BAZ";,
+              Foo[Foo["BAR"] = 0] = "BAR";
+              Foo[Foo["BAZ"] = 1] = "BAZ";
             })(Foo || (Foo = {}));
           "
     `)
@@ -41,11 +41,43 @@ describe('enum', () => {
     `)).toMatchInlineSnapshot(`
       "
             var  A; (function (A) {
-              A[A["X"] = 0] = "X";,
-              A[A["!X"] = 1] = "!X";,
-              A[A["Y"] = 1] = "Y";,
-              A[A["!Y"] = 2] = "!Y";
+              A[A["X"] = 0] = "X";
+              A[A["!X"] = 1] = "!X";
+              A[A["Y"] = 1] = "Y";
+              A[A["!Y"] = 2] = "!Y"
             })(A || (A = {}));
+          "
+    `)
+
+    expect(transplat(`
+      enum A { B, C }
+    `)).toMatchInlineSnapshot(`
+      "
+            var  A; (function (A) { A[A["B"] = 0] = "B"; A[A["C"] = 1] = "C" })(A || (A = {}));
+          "
+    `)
+
+    expect(transplat(`
+      enum A { B,
+      C }
+    `)).toMatchInlineSnapshot(`
+      "
+            var  A; (function (A) { A[A["B"] = 0] = "B";
+            A[A["C"] = 1] = "C" })(A || (A = {}));
+          "
+    `)
+
+    expect(transplat(`
+      /**/enum/**/Foo/**/{/**/
+        /**/BAR/**/,/**/
+        /**/BAZ/**/,/**/
+      /**/}/**/
+    `)).toMatchInlineSnapshot(`
+      "
+            /**/var /**/Foo; (function (Foo)/**/{/**/
+              /**/Foo[Foo["BAR"] = 0] = "BAR"/**/;/**/
+              /**/Foo[Foo["BAZ"] = 1] = "BAZ"/**/;/**/
+            /**/})(Foo || (Foo = {}));/**/
           "
     `)
   })

@@ -1,7 +1,7 @@
 import type { Node } from 'oxc-parser'
 
 export type NodeType = Node['type']
-export type CallbackOf<T extends NodeType> = (node: Node & { type: T }, parent: Node | null) => (Node | null | undefined)[] | Node | undefined | void
+export type CallbackOf<T extends NodeType> = (node: Node & { type: T }, parent: Node | null) => (Node | null | undefined | void)[] | Node | null | undefined | void
 export type WalkerCallbacks = {
   [K in NodeType]?: CallbackOf<K> | null
 }
@@ -17,7 +17,7 @@ function _walk(parent: Node | null, node: Node, callbacks: WalkerCallbacks) {
     return
   }
 
-  const callback = callbacks[node.type] as ((node: Node, parent: Node | null) => (Node | null | undefined)[] | Node | undefined) | null | undefined
+  const callback = callbacks[node.type] as ((node: Node, parent: Node | null) => (Node | null | undefined)[] | Node | null | undefined) | null | undefined
 
   if (!callback) {
     if (callback === undefined && !warned.has(node.type)) {

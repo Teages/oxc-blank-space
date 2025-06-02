@@ -1,30 +1,59 @@
-import type { Node } from 'oxc-parser'
-import type { NodeType } from './walker'
+import type { Node, Statement } from 'oxc-parser'
 import { parseSync } from 'oxc-parser'
 import { SyntaxKind } from 'typescript'
 import { CodeString } from './code-string'
 import { firstToken, lastToken, walkTokens } from './token'
 import { walk } from './walker'
 
-export function test() {
-  return 'works!'
+function isFunctionLikeExpression(node: Node): boolean {
+  return node.type === 'ArrowFunctionExpression'
+    || node.type === 'FunctionDeclaration'
+    || node.type === 'MethodDefinition'
+    || node.type === 'FunctionExpression'
 }
 
-const FunctionLikeExpression = new Set<string>([
-  // TODO: check if the list is correct
-  'FunctionExpression',
-  'MethodDefinition',
-  'ArrowFunctionExpression',
-  'FunctionDeclaration',
-] satisfies NodeType[])
+function isStatement(node: Node): node is Statement {
+  return node.type === 'BlockStatement'
+    || node.type === 'BreakStatement'
+    || node.type === 'ContinueStatement'
+    || node.type === 'DebuggerStatement'
+    || node.type === 'DoWhileStatement'
+    || node.type === 'EmptyStatement'
+    || node.type === 'ExpressionStatement'
+    || node.type === 'ForInStatement'
+    || node.type === 'ForOfStatement'
+    || node.type === 'ForStatement'
+    || node.type === 'IfStatement'
+    || node.type === 'LabeledStatement'
+    || node.type === 'ReturnStatement'
+    || node.type === 'SwitchStatement'
+    || node.type === 'ThrowStatement'
+    || node.type === 'TryStatement'
+    || node.type === 'WhileStatement'
+    || node.type === 'WithStatement'
 
-const StatementLikeNode = new Set<string>([
-  // TODO: check if the list is correct
-  'PropertyDefinition',
-  'VariableDeclarator',
-  'ExpressionStatement',
-  'ReturnStatement',
-] satisfies NodeType[])
+    // Declaration
+    || node.type === 'VariableDeclaration'
+    || node.type === 'FunctionDeclaration'
+    || node.type === 'FunctionExpression'
+    || node.type === 'TSDeclareFunction'
+    || node.type === 'TSEmptyBodyFunctionExpression'
+    || node.type === 'ClassDeclaration'
+    || node.type === 'ClassExpression'
+    || node.type === 'TSTypeAliasDeclaration'
+    || node.type === 'TSInterfaceDeclaration'
+    || node.type === 'TSEnumDeclaration'
+    || node.type === 'TSModuleDeclaration'
+    || node.type === 'TSImportEqualsDeclaration'
+
+    // ModuleDeclaration
+    || node.type === 'ImportDeclaration'
+    || node.type === 'ExportAllDeclaration'
+    || node.type === 'ExportDefaultDeclaration'
+    || node.type === 'ExportNamedDeclaration'
+    || node.type === 'TSExportAssignment'
+    || node.type === 'TSNamespaceExportDeclaration'
+}
 
 export function transplat(code: string) {
   const ast = parseSync('code.ts', code)
@@ -33,10 +62,8 @@ export function transplat(code: string) {
   }
 
   const s = new CodeString(code)
-  const inlineRanges: [number, number][] = []
 
   const removeNodeInline = (node: Node) => {
-    inlineRanges.push([node.start, node.end])
     s.blank(node.start, node.end)
   }
 
@@ -325,14 +352,12 @@ export function transplat(code: string) {
         node.value,
       ]
     },
-    AccessorProperty: (node) => {
-      return [
-        ...node.decorators,
-        node.key,
-        node.typeAnnotation,
-        node.value,
-      ]
-    },
+    AccessorProperty: node => [
+      ...node.decorators,
+      node.key,
+      node.typeAnnotation,
+      node.value,
+    ],
     MethodDefinition: (node, parent) => {
       const tokenToRemove = new Set<SyntaxKind>()
       if (node.override) {
@@ -472,6 +497,9 @@ export function transplat(code: string) {
     ThrowStatement: node => [
       node.argument,
     ],
+    SequenceExpression: node => [
+      ...node.expressions,
+    ],
 
     /** TypeScript Syntax */
     TSTypeAnnotation: removeNodeInline,
@@ -479,7 +507,7 @@ export function transplat(code: string) {
       s.removeButKeep(node.start, node.end, node.expression.start, node.expression.end),
     TSSatisfiesExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
-      if (parent && StatementLikeNode.has(parent.type) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+      if (parent && isStatement(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
         s.replaceWith(node.expression.end, node.expression.end + 1, ';')
       }
 
@@ -488,7 +516,7 @@ export function transplat(code: string) {
     TSTypeParameterDeclaration: (node, parent) => {
       removeNodeInline(node)
 
-      if (parent && FunctionLikeExpression.has(parent.type)) {
+      if (parent && isFunctionLikeExpression(parent)) {
         const nextToken = firstToken(s.getCurrent(node.end, parent.end))
 
         if (nextToken?.kind === SyntaxKind.OpenParenToken) {
@@ -506,7 +534,7 @@ export function transplat(code: string) {
     TSAsExpression: (node, parent) => {
       s.blank(node.expression.end, node.end)
 
-      if (parent && StatementLikeNode.has(parent.type) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
+      if (parent && isStatement(parent) && node.end === parent.end && s.getOriginalChar(node.end) !== ';') {
         s.replaceWith(node.expression.end, node.expression.end + 1, ';')
       }
 
@@ -517,7 +545,7 @@ export function transplat(code: string) {
 
       return [node.expression]
     },
-    TSAbstractPropertyDefinition: removeNodeInline,
+    TSAbstractPropertyDefinition: removeNodeBlock, // it's a inline node, but we need to add a semicolon
     TSAbstractMethodDefinition: removeNodeInline,
     TSDeclareFunction: removeNodeBlock,
     TSInterfaceDeclaration: removeNodeBlock,
@@ -537,7 +565,7 @@ export function transplat(code: string) {
      * ```
      *
      * ```js
-     * var A; (function (A) {
+     * var  A; (function (A) {
      *   A[A["X"] = 0] = "X";
      *   A[A["!X"] = 1] = "!X";
      *   A[A["Y"] = 1] = "Y";
@@ -552,7 +580,8 @@ export function transplat(code: string) {
       }
 
       const enumName = node.id.name
-      s.overwrite(node.start, node.id.end, `var  ${enumName}; (function (${enumName})`)
+      s.overwrite(node.start, node.start + 4, `var `)
+      s.overwrite(node.id.start, node.id.end, `${enumName}; (function (${enumName})`)
       s.overwrite(node.end, node.end, `)(${enumName} || (${enumName} = {}));`)
 
       let lastValue = -1
@@ -585,7 +614,15 @@ export function transplat(code: string) {
         }
 
         // Generate member assignment
-        const assignment = `${enumName}[${enumName}["${memberName}"] = ${lastValue}] = "${memberName}";`
+        const assignment = `${enumName}[${enumName}["${memberName}"] = ${lastValue}] = "${memberName}"`
+
+        // try to find the next `,` and remove it
+        const nextToken = firstToken(s.getCurrent(member.end, node.end))
+        const hasComma = nextToken?.kind === SyntaxKind.CommaToken
+        if (hasComma) {
+          s.overwrite(member.end + nextToken.start, member.end + nextToken.end, ';')
+        }
+
         s.overwrite(member.start, member.end, assignment)
       }
       return undefined
@@ -593,9 +630,6 @@ export function transplat(code: string) {
     TSEnumBody: null,
     TSEnumMember: null,
   })
-
-  // for (const [start, end] of inlineRanges) {
-  // }
 
   return s.toString()
 }
