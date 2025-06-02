@@ -1,8 +1,8 @@
 
-                  
+;                 
 // ^^^^^^^^^^^^^^^ empty namespace
 
-                    
+;                   
                     
 
                                
@@ -15,23 +15,23 @@
  
 // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-only namespace
 
-                             
+;                            
                              
  
 
-                        
+;                       
                                      
                                 
  
 // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ nested namespaces
 
 // declaring the existence of a runtime namespace:
-                            
+;                           
                                
  
 // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `declare namespace`
 
-                              
+;                             
                               
                                
  

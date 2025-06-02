@@ -6,15 +6,15 @@ let x /**/        /**/ = 1 ;
 
 class C /**/     /*︎*/ extends Array/**/    /*︎*/              /*︎*/ {
 //          ^^^^^                      ^^^     ^^^^^^^^^^^^^^
-             field/**/        /**/ = "";
+    ;        field/**/        /**/ = "";
 //  ^^^^^^^^          ^^^^^^^^
     static accessor f1;
-            f2/**/ /**/        /*︎*/;
+    ;       f2/**/ /**/        /*︎*/;
 //  ^^^^^^^       ^    ^^^^^^^^
     ;               
 //  ^^^^^^^^^^^^^^^^ declared property
 
-           method/**/   /*︎*/(/*︎*/        /**/ a  /*︎*/        /**/)/*︎*/      /*︎*/ {
+    ;      method/**/   /*︎*/(/*︎*/        /**/ a  /*︎*/        /**/)/*︎*/      /*︎*/ {
 //  ^^^^^^           ^^^         ^^^^^^^^      ^     ^^^^^^^^         ^^^^^^
     }
 
@@ -29,7 +29,7 @@ class C /**/     /*︎*/ extends Array/**/    /*︎*/              /*︎*/ {
 
 class D extends C      {
 //               ^^^^^
-             method(...args)      {}
+    ;        method(...args)      {}
 //  ^^^^^^^^                ^^^^^
 }
 
@@ -69,7 +69,7 @@ class E extends (function() {}       ) {
 }
 
 {
-                                
+    ;                           
 //  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ overload
     function overload()      {}
 //                     ^^^^^
@@ -165,7 +165,7 @@ void 0;
 };
 {
 //» (a, b, c: D = [] as any/*comment-1*/)/*comment-2*/:
-    (a, b, c    = []       /*comment-1*/               
+    (a, b, c    = []       /*comment-1*/ /*comment-2*/ 
       ) =>
 //« any =>
     1

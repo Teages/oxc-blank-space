@@ -25,7 +25,7 @@ const c = async (
 (function () {
     return/**/(
          
-     /**/ v         
+     /**/ v    /**/ 
     )/**/=> v
 });
 (function* () {
