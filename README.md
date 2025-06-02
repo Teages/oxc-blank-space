@@ -40,6 +40,15 @@ import { test } from '@teages/oxc-blank-space'
 // Sorry we don't support CommonJS, but you can use `require('@teages/oxc-blank-space')` in latest LTS version of Node.js
 ```
 
+Usage:
+
+```ts
+import { transpile } from '@teages/oxc-blank-space'
+
+console.log(transpile(`const a: number = 1`))
+// result: `const a         = 1`
+```
+
 ## Development
 
 - Clone this repository
