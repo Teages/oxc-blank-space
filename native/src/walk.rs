@@ -26,11 +26,15 @@ pub enum VisitResult {
 }
 
 /// One pass over the AST collecting every node in preorder, assigning each a
-/// sequential index via its `node_id` cell, and recording tree children.
+/// sequential index via its `node_id` cell, and recording tree children as a
+/// first-child/next-sibling linked list (flat vectors, no per-node heap
+/// allocation — the per-node `Vec` this replaces dominated the flatten pass).
 #[derive(Default)]
 struct Flattener<'a> {
     nodes: Vec<AstKind<'a>>,
-    children: Vec<Vec<u32>>,
+    first_child: Vec<u32>,
+    next_sibling: Vec<u32>,
+    last_child: Vec<u32>,
     stack: Vec<u32>,
 }
 
@@ -39,11 +43,19 @@ impl<'a> Visit<'a> for Flattener<'a> {
         let index = self.nodes.len() as u32;
         kind.set_node_id(NodeId::new(index as usize));
         if let Some(&parent) = self.stack.last() {
-            self.children[parent as usize].push(index);
+            let last = self.last_child[parent as usize];
+            if last == u32::MAX {
+                self.first_child[parent as usize] = index;
+            } else {
+                self.next_sibling[last as usize] = index;
+            }
+            self.last_child[parent as usize] = index;
         }
         self.stack.push(index);
         self.nodes.push(kind);
-        self.children.push(Vec::new());
+        self.first_child.push(u32::MAX);
+        self.next_sibling.push(u32::MAX);
+        self.last_child.push(u32::MAX);
     }
 
     fn leave_node(&mut self, _kind: AstKind<'a>) {
@@ -55,9 +67,32 @@ pub struct Walker<'a> {
     pub src: &'a str,
     pub blanker: Blanker<'a>,
     nodes: Vec<AstKind<'a>>,
-    children: Vec<Vec<u32>>,
+    first_child: Vec<u32>,
+    next_sibling: Vec<u32>,
+    /// Reusable per-depth buffers for generic child lists (zero-alloc in the
+    /// steady state; the pool grows to the maximum nesting depth).
+    scratch_pool: Vec<Vec<u32>>,
     /// Statement currently being walked, used by the `as`/`satisfies` rule.
     pub(crate) parent_statement: Option<u32>,
+}
+
+/// Iterator over the linked-list children of a node, in visit order.
+pub(crate) struct Children<'w, 'a> {
+    walker: &'w Walker<'a>,
+    next: u32,
+}
+
+impl Iterator for Children<'_, '_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        if self.next == u32::MAX {
+            return None;
+        }
+        let current = self.next;
+        self.next = self.walker.next_sibling[current as usize];
+        Some(current)
+    }
 }
 
 /// Blank a whole program: returns the blanked output and the unsupported
@@ -74,7 +109,9 @@ pub fn blank_program(program: &Program<'_>, src: &str) -> (String, Vec<Unsupport
         src,
         blanker: Blanker::new(src, comment_spans),
         nodes: flattener.nodes,
-        children: flattener.children,
+        first_child: flattener.first_child,
+        next_sibling: flattener.next_sibling,
+        scratch_pool: Vec::new(),
         parent_statement: None,
     };
 
@@ -185,8 +222,11 @@ impl<'a> Walker<'a> {
     }
 
     /// Tree children of the node at `idx` (in visit order).
-    pub(crate) fn children_of(&self, idx: u32) -> &[u32] {
-        &self.children[idx as usize]
+    pub(crate) fn children_of(&self, idx: u32) -> Children<'_, 'a> {
+        Children {
+            walker: self,
+            next: self.first_child[idx as usize],
+        }
     }
 
     /// Visit a nested node, keeping the semicolon state up to date.
@@ -253,24 +293,40 @@ impl<'a> Walker<'a> {
 
     /// The child of `parent` whose span equals `span`.
     pub(crate) fn child_with_span(&self, parent: u32, span: Span) -> Option<u32> {
-        self.children[parent as usize]
-            .iter()
-            .copied()
+        self.children_of(parent)
             .find(|&c| self.nodes[c as usize].span() == span)
     }
 
     fn visit_children(&mut self, idx: u32) -> VisitResult {
-        let children = take(&mut self.children[idx as usize]);
+        let mut children = self.scratch_pool.pop().unwrap_or_default();
+        children.clear();
+
+        let mut child = self.first_child[idx as usize];
+        let mut sorted = true;
+        let mut previous_start = 0u32;
+        while child != u32::MAX {
+            let start = self.nodes[child as usize].span().start;
+            if start < previous_start {
+                sorted = false;
+            }
+            previous_start = start;
+            children.push(child);
+            child = self.next_sibling[child as usize];
+        }
         if children.is_empty() {
+            self.scratch_pool.push(children);
             return VisitResult::Js;
         }
 
-        let mut children = children;
-        children.sort_by_key(|&c| self.nodes[c as usize].span().start);
+        if !sorted {
+            children.sort_by_key(|&c| self.nodes[c as usize].span().start);
+        }
         // The first element of a child array decides whether the array is
         // walked with statement tracking (`parentStatement`).
         let is_statement_like = is_statement_like(self.nodes[children[0] as usize]);
-        self.visit_node_array(&children, is_statement_like, false)
+        let result = self.visit_node_array(&children, is_statement_like, false);
+        self.scratch_pool.push(children);
+        result
     }
 
     pub(crate) fn visit_node(&mut self, idx: u32) -> VisitResult {
@@ -493,3 +549,4 @@ fn is_statement_like(kind: AstKind<'_>) -> bool {
         ),
     }
 }
+
