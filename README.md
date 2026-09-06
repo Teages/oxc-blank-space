@@ -15,26 +15,47 @@ console.log(transpile(`const a: number = 1`))
 - Newlines inside erased ranges are preserved, so **line and column numbers of the remaining code never change** — stack traces and source maps keep pointing at the original positions.
 - The output is always equal in length to the input.
 
-## Unsupported (runtime) TypeScript
+## Runtime TypeScript
 
-Constructs with runtime behavior cannot be blanked. They are kept verbatim and reported through `onError`, mirroring ts-blank-space:
+### Enums are expanded
 
-- `enum` / `const enum` (unless `declare`)
-- namespaces containing runtime code; legacy `module X {}` declarations
-- constructor parameter properties (`constructor(private a: string)`)
-- `export = ...` and `import x = require(...)`
-- legacy prefix type assertions (`<T>expr`)
-- `as`/`satisfies` erasures that would change operator grouping (e.g. `1 + 1 as T / 2`)
+Enums are expanded in place into the same IIFE shape the TypeScript compiler emits, so runtime behavior (including reverse numeric mappings and member references) is preserved exactly:
 
 ```ts
-transpile(`enum Color { Red }`, {
+transpile(`enum Color { Red, Green = 5 }`)
+// 'var  Color; (function (Color) { Color[Color["Red"] = 0] = "Red";
+//   Color[Color["Green"] = 5] = "Green" })(Color || (Color = {}));'
+```
+
+`const enum` is expanded the same way: the tool never rewrites use sites, so the enum object must exist at runtime for `CE.A` to keep resolving. Note that enum expansion is the one transformation that may change the output length (and therefore the positions of code after the enum).
+
+### Assertions that would regroup get parentheses
+
+Erasing an `as`/`satisfies` whose grouping matters inserts parentheses so semantics are preserved, reusing the erased span so lengths stay equal:
+
+```ts
+transpile(`const x = 1 + 1 as T / 2`)
+// 'const x = (1 + 1)    / 2'
+```
+
+### Unsupported constructs
+
+Truly unsupported constructs are kept verbatim and reported through `onError`:
+
+- constructor parameter properties (`constructor(private a: string)`)
+- namespaces containing runtime code; legacy `module X {}` declarations
+- `export = ...` and `import x = require(...)`
+- legacy prefix type assertions (`<T>expr`)
+
+```ts
+transpile(`class C { constructor(private a: string) {} }`, {
     onError: (node) => {
-        // node.type === 'TSEnumDeclaration', node.start / node.end offsets
+        // node.type === 'TSParameterProperty', node.start / node.end offsets
     },
 })
 ```
 
-Inputs oxc cannot parse at all (e.g. some operator-grouping edge cases) are returned unchanged.
+Inputs oxc cannot parse at all are returned unchanged.
 
 ## API
 
