@@ -1,8 +1,8 @@
-import { parseSync } from "oxc-parser";
-import type { TranspileOptions } from "./types.js";
-import { blankProgram } from "./walk.js";
+import type { TranspileOptions } from './types.js'
+import { parseSync } from 'oxc-parser'
+import { blankProgram } from './walk.js'
 
-export type { OnError, TranspileOptions, UnsupportedSyntax } from "./types.js";
+export type { OnError, TranspileOptions, UnsupportedSyntax } from './types.js'
 
 /**
  * Replace TypeScript-only syntax with whitespace, keeping the remaining
@@ -21,23 +21,23 @@ export type { OnError, TranspileOptions, UnsupportedSyntax } from "./types.js";
  * are kept verbatim and reported through `options.onError`.
  */
 export function transpile(
-    input: string,
-    options: TranspileOptions = {},
+  input: string,
+  options: TranspileOptions = {},
 ): string {
-    const filename = options.lang === "tsx" ? "input.tsx" : "input.ts";
-    const parsed = parseSync(filename, input, { sourceType: "module" });
+  const filename = options.lang === 'tsx' ? 'input.tsx' : 'input.ts'
+  const parsed = parseSync(filename, input, { sourceType: 'module' })
 
-    // Hard parse failures leave no usable AST; keep the input untouched. (Soft
-    // parse errors still produce a recovered AST, which we process like
-    // ts-blank-space does for TypeScript's recovered trees.)
-    if (parsed.program.body.length === 0 && parsed.errors.length > 0) {
-        return input;
-    }
+  // Hard parse failures leave no usable AST; keep the input untouched. (Soft
+  // parse errors still produce a recovered AST, which we process like
+  // ts-blank-space does for TypeScript's recovered trees.)
+  if (parsed.program.body.length === 0 && parsed.errors.length > 0) {
+    return input
+  }
 
-    return blankProgram(
-        parsed.program,
-        input,
-        parsed.comments,
-        options.onError,
-    );
+  return blankProgram(
+    parsed.program,
+    input,
+    parsed.comments,
+    options.onError,
+  )
 }
