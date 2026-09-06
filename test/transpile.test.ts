@@ -1,7 +1,7 @@
 import { parseSync } from 'oxc-parser'
 import tsBlankSpace from 'ts-blank-space'
 import { describe, expect, it } from 'vitest'
-import { transpile } from '../src/index.js'
+import { transpile } from '../src/index'
 
 describe('transpile', () => {
   it('blanks a type annotation while preserving positions', () => {

@@ -4,13 +4,13 @@ import type {
   Node,
   VariableDeclaration,
 } from 'oxc-parser'
-import type { Blanker } from '../core/blanker.js'
-import type { VisitResult } from '../types.js'
-import { VISIT_BLANKED, VISIT_JS } from '../types.js'
-import { visitClassLike } from './class.js'
-import { expandEnum } from './enum.js'
-import { visitFunctionLike } from './function.js'
-import { shouldBlankModule } from './namespace.js'
+import type { Blanker } from '../core/blanker'
+import type { VisitResult } from '../types'
+import { VISIT_BLANKED, VISIT_JS } from '../types'
+import { visitClassLike } from './class'
+import { expandEnum } from './enum'
+import { visitFunctionLike } from './function'
+import { shouldBlankModule } from './namespace'
 
 export function visitImportDeclaration(
   blanker: Blanker,

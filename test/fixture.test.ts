@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import tsBlankSpace from 'ts-blank-space'
 import { expect, it } from 'vitest'
-import { transpile } from '../src/index.js'
+import { transpile } from '../src/index'
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), 'fixture')
 

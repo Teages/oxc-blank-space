@@ -1,13 +1,13 @@
 import type { Comment, Node } from 'oxc-parser'
-import type { OnError, VisitResult } from '../types.js'
+import type { OnError, VisitResult } from '../types'
 import {
 
   VISIT_BLANKED,
   VISIT_JS,
 
-} from '../types.js'
-import BlankString from './blank-string.js'
-import { Trivia } from './trivia.js'
+} from '../types'
+import BlankString from './blank-string'
+import { Trivia } from './trivia'
 
 /**
  * Per-run state plus the primitive blanking operations. The walk logic lives in

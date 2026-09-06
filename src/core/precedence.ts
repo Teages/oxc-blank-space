@@ -1,4 +1,4 @@
-import type { Trivia } from './trivia.js'
+import type { Trivia } from './trivia'
 
 /**
  * Binary operator precedence, mirroring TypeScript's

@@ -1,8 +1,8 @@
-import type { TranspileOptions } from './types.js'
+import type { TranspileOptions } from './types'
 import { parseSync } from 'oxc-parser'
-import { blankProgram } from './visitor/walk.js'
+import { blankProgram } from './visitor/walk'
 
-export type { OnError, TranspileOptions, UnsupportedSyntax } from './types.js'
+export type { OnError, TranspileOptions, UnsupportedSyntax } from './types'
 
 /**
  * Replace TypeScript-only syntax with whitespace, keeping the remaining

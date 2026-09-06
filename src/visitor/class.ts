@@ -6,10 +6,10 @@ import type {
   PropertyDefinition,
   TSClassImplements,
 } from 'oxc-parser'
-import type { Blanker } from '../core/blanker.js'
-import type { VisitResult } from '../types.js'
-import { VISIT_BLANKED, VISIT_JS } from '../types.js'
-import { blankTypeParameters } from './function.js'
+import type { Blanker } from '../core/blanker'
+import type { VisitResult } from '../types'
+import { VISIT_BLANKED, VISIT_JS } from '../types'
+import { blankTypeParameters } from './function'
 
 type ClassMember = PropertyDefinition | AccessorProperty | MethodDefinition
 

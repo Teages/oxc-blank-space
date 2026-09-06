@@ -1,8 +1,8 @@
 import type { Node, TSEnumDeclaration, TSEnumMember } from 'oxc-parser'
-import type { Blanker } from '../core/blanker.js'
-import type { VisitResult } from '../types.js'
+import type { Blanker } from '../core/blanker'
+import type { VisitResult } from '../types'
 import { visitorKeys } from 'oxc-parser'
-import { VISIT_BLANKED, VISIT_JS } from '../types.js'
+import { VISIT_BLANKED, VISIT_JS } from '../types'
 
 /**
  * Enums have runtime behavior, so instead of being blanked they are expanded
