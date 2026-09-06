@@ -43,32 +43,46 @@ impl BlankString {
         self.ranges.push((REPLACE_WITH_BLANK, start, end, u32::MAX));
     }
 
+    /// Splice into a single exactly-sized buffer: untouched regions are copied
+    /// verbatim, blanks become newline-preserving space runs, and the extra
+    /// capacity needed by text overrides is computed up front so the whole
+    /// output is built with one allocation.
     pub fn build(&self, input: &str) -> String {
         let ranges = &self.ranges;
         if ranges.is_empty() {
             return input.to_string();
         }
 
-        let mut out = String::with_capacity(input.len());
+        let mut extra = 0usize;
+        for &(flags, start, end, text_index) in ranges {
+            if flags == REPLACE_WITH_TEXT {
+                let len = self.texts[text_index as usize].len();
+                extra += len.saturating_sub((end - start) as usize);
+            }
+        }
+
+        let mut out = Vec::with_capacity(input.len() + extra);
         let mut previous_end = 0u32;
 
         for &(flags, start, end, text_index) in ranges {
             let range_start = start.max(previous_end);
-            out.push_str(&input[previous_end as usize..range_start as usize]);
+            out.extend_from_slice(&input.as_bytes()[previous_end as usize..range_start as usize]);
 
             let mut range_start = range_start;
             match flags {
-                REPLACE_WITH_TEXT => out.push_str(&self.texts[text_index as usize]),
+                REPLACE_WITH_TEXT => {
+                    out.extend_from_slice(self.texts[text_index as usize].as_bytes())
+                }
                 REPLACE_WITH_CLOSE_PAREN => {
-                    out.push(')');
+                    out.push(b')');
                     range_start += 1;
                 }
                 REPLACE_WITH_SEMI => {
-                    out.push(';');
+                    out.push(b';');
                     range_start += 1;
                 }
                 REPLACE_WITH_OPEN_PAREN => {
-                    out.push('(');
+                    out.push(b'(');
                     range_start += 1;
                 }
                 _ => {}
@@ -76,12 +90,15 @@ impl BlankString {
 
             previous_end = end;
             if flags != REPLACE_WITH_TEXT {
-                out.push_str(&get_space(input, range_start, previous_end));
+                write_space(&mut out, input, range_start, previous_end);
             }
         }
 
-        out.push_str(&input[previous_end as usize..]);
-        out
+        out.extend_from_slice(&input[previous_end as usize..].as_bytes());
+        // ranges only ever contain the input, spaces, and caller-provided text
+        // (all UTF-8), so the buffer is valid UTF-8 by construction.
+        // SAFETY-free variant: String::from_utf8 checked in debug builds.
+        String::from_utf8(out).expect("output buffer is valid UTF-8")
     }
 }
 
@@ -90,25 +107,32 @@ impl BlankString {
 /// blanks one space per `charCodeAt` unit — a non-BMP char becomes 2 spaces).
 ///
 /// Ranges pushed out of source order (a blank nested inside an already-blanked
-/// region) yield an empty replacement here, matching the JS loop which never
-/// enters its body when `start >= end`.
-fn get_space(input: &str, start: u32, end: u32) -> String {
+/// region) write nothing here, matching the JS loop which never enters its
+/// body when `start >= end`.
+fn write_space(out: &mut Vec<u8>, input: &str, start: u32, end: u32) {
     if start >= end {
-        return String::new();
+        return;
     }
-    let mut out = String::new();
+    let bytes = &input.as_bytes()[start as usize..end as usize];
+    if bytes.is_ascii() {
+        // Fast path: an ASCII byte maps to itself for newlines and to one
+        // space for everything else.
+        for &b in bytes {
+            out.push(if b == b'\n' || b == b'\r' { b } else { b' ' });
+        }
+        return;
+    }
     for c in input[start as usize..end as usize].chars() {
         match c {
-            '\n' => out.push('\n'),
-            '\r' => out.push('\r'),
+            '\n' => out.push(b'\n'),
+            '\r' => out.push(b'\r'),
             _ => {
                 for _ in 0..c.len_utf16() {
-                    out.push(' ');
+                    out.push(b' ');
                 }
             }
         }
     }
-    out
 }
 
 #[cfg(test)]
