@@ -16,20 +16,9 @@ type Assertion = Extract<
     Node,
     { type: "TSAsExpression" | "TSSatisfiesExpression" }
 >;
-type LogicalExpression = Extract<Node, { type: "LogicalExpression" }>;
-type BinaryExpression = Extract<Node, { type: "BinaryExpression" }>;
 
 const isAssertion = (node: Node): node is Assertion =>
     node.type === "TSAsExpression" || node.type === "TSSatisfiesExpression";
-
-/** Strip a chain of `as`/`satisfies` down to the wrapped expression. */
-function stripAssertionChain(node: Node): Node {
-    let current = node;
-    while (isAssertion(current)) {
-        current = current.expression;
-    }
-    return current;
-}
 
 export function visitCallOrNew(
     blanker: Blanker,
@@ -67,22 +56,17 @@ export function visitNonNullExpression(
 }
 
 /**
- * `expr as T` / `expr satisfies T`. When erasing the assertion would change
- * operator grouping — a following operator outranking the base expression
- * (`1 + 1 as T / 2`) — the base expression is wrapped in parentheses so the
- * output keeps the TypeScript semantics: `(1 + 1) / 2`.
+ * `expr as T` / `expr satisfies T`. When the assertion ends the enclosing
+ * statement without a trailing `;`, the blank starts with a `;` so that a
+ * following `(`- or `[`-headed statement cannot merge into the expression.
  */
 export function visitTypeAssertion(
     blanker: Blanker,
     node: Assertion,
 ): VisitResult {
-    const baseExpr = stripAssertionChain(node.expression);
-    if (
-        baseExpr.type === "BinaryExpression" &&
-        wouldChangeBinaryGrouping(blanker, node.end, baseExpr)
-    ) {
-        pushOpenParen(blanker, baseExpr.start);
-        pushCloseParen(blanker, baseExpr.end, node.end);
+    if (assertionChainWouldChangeBinaryGrouping(blanker, node)) {
+        blanker.report(node);
+        return VISIT_JS;
     }
 
     const result = blanker.visitNested(node.expression);
@@ -100,20 +84,27 @@ export function visitTypeAssertion(
 }
 
 /**
- * Detect if erasing a type assertion would change the runtime semantics due to
- * operator re-grouping. e.g. In `1 + 1 as T / 2` erasing `as T` would rebind
- * the `/` onto `2` instead of onto `(1 + 1)`.
+ * Detect if erasing a type assertion would result in a runtime syntax error due
+ * to changed operator grouping. e.g. In `1 + 1 as T / 2` erasing `as T` would
+ * rebind the `/` onto `(1 + 1)` which TypeScript would not allow silently.
  */
-function wouldChangeBinaryGrouping(
+function assertionChainWouldChangeBinaryGrouping(
     blanker: Blanker,
-    assertionEnd: number,
-    baseExpr: BinaryExpression,
+    node: Assertion,
 ): boolean {
-    const nextToken = nextOperatorAfter(
-        blanker.src,
-        blanker.trivia,
-        assertionEnd,
-    );
+    let baseExpr: Node = node.expression;
+    while (
+        baseExpr.type === "TSAsExpression" ||
+        baseExpr.type === "TSSatisfiesExpression"
+    ) {
+        baseExpr = baseExpr.expression;
+    }
+
+    if (baseExpr.type !== "BinaryExpression") {
+        return false;
+    }
+
+    const nextToken = nextOperatorAfter(blanker.src, blanker.trivia, node.end);
     const basePrecedence = getBinaryOperatorPrecedence(baseExpr.operator);
     const nextPrecedence =
         nextToken === undefined
@@ -136,45 +127,14 @@ function wouldChangeBinaryGrouping(
 }
 
 /**
- * Wrap the expression starting at `wrapStart` and ending at `baseEnd` in
- * parentheses. `(` is inserted at `wrapStart`; `)` is inserted at `baseEnd`
- * and consumes up to two characters after it (part of the erased ` as` span,
- * whose blank op is then clamped shorter), so the output length usually stays
- * unchanged. Newlines are never consumed; in that case the output grows by at
- * most two characters.
- *
- * Because every later op is clamped against the consumed range, callers must
- * visit children inside the wrapped region between the two pushes and
- * children after `baseEnd` after the second push.
- */
-function pushOpenParen(blanker: Blanker, wrapStart: number): void {
-    blanker.output.override(wrapStart, wrapStart, "(");
-}
-
-function pushCloseParen(
-    blanker: Blanker,
-    baseEnd: number,
-    limit: number,
-): void {
-    let closeEnd = baseEnd;
-    for (let i = 0; i < 2 && closeEnd < limit; i++) {
-        const char = blanker.src[closeEnd];
-        if (char === "\n" || char === "\r") break;
-        closeEnd += 1;
-    }
-    blanker.output.override(baseEnd, closeEnd, ")");
-}
-
-/**
  * Detect cases where erasing an assertion inside a logical chain would produce
  * a syntax error because `??` may not be mixed with `||`/`&&` unparenthesized.
  * e.g. `a ?? b as T && c` parses as `??[a, &&[as[b, T], c]]` and erasing the
- * assertion would leave `a ?? b && c`; the inner logical expression is wrapped
- * so the output keeps the TypeScript semantics: `a ?? (b && c)`.
+ * assertion would leave `a ?? b && c`.
  */
 export function visitLogicalExpression(
     blanker: Blanker,
-    node: LogicalExpression,
+    node: Extract<Node, { type: "LogicalExpression" }>,
 ): VisitResult {
     const { operator, left, right } = node;
     if (
@@ -182,52 +142,23 @@ export function visitLogicalExpression(
         hasUnsafeNullishLogicalMix(operator, right.operator) &&
         isAssertion(right.left)
     ) {
-        return visitMixedLogical(blanker, node, right, right.left, true);
+        blanker.visitNested(left);
+        blanker.report(right.left);
+        blanker.visitNested(right.right);
+        return VISIT_JS;
     }
     if (
         left.type === "LogicalExpression" &&
         hasUnsafeNullishLogicalMix(operator, left.operator) &&
         isAssertion(left.right)
     ) {
-        return visitMixedLogical(blanker, node, left, left.right, false);
+        blanker.visitNested(left.left);
+        blanker.report(left.right);
+        blanker.visitNested(right);
+        return VISIT_JS;
     }
     blanker.visitNested(left);
     blanker.visitNested(right);
-    return VISIT_JS;
-}
-
-/**
- * The parse shape is `outer[operandOutside, inner[assertion, rest]]`; wrapping
- * `inner` keeps the grouping. Children are visited so their ops stay in source
- * order with the inserted parens: the operand before `inner` first, then the
- * parens, then the assertion erasure (clamped after the inserted `)`), then
- * the remaining operand.
- */
-function visitMixedLogical(
-    blanker: Blanker,
-    node: LogicalExpression,
-    inner: LogicalExpression,
-    assertion: Assertion,
-    innerIsRight: boolean,
-): VisitResult {
-    const baseExpr = stripAssertionChain(assertion);
-    if (innerIsRight) {
-        // `left ?? (assertion && inner.right)` — nothing of `inner` precedes
-        // the assertion, so both paren pushes happen up front.
-        blanker.visitNested(node.left);
-        pushOpenParen(blanker, inner.start);
-        pushCloseParen(blanker, baseExpr.end, inner.end);
-        blanker.visitNode(assertion);
-        blanker.visitNested(inner.right);
-        return VISIT_JS;
-    }
-    // `inner.left && (assertion) ?? right` — `inner.left` lies inside the
-    // parens and must be erased between the two pushes.
-    pushOpenParen(blanker, inner.start);
-    blanker.visitNested(inner.left);
-    pushCloseParen(blanker, baseExpr.end, inner.end);
-    blanker.visitNode(assertion);
-    blanker.visitNested(node.right);
     return VISIT_JS;
 }
 
