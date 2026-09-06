@@ -9,7 +9,7 @@ function isWhitespaceCode(code: number): boolean {
     || /* \v */ code === 12
 } /* \f */
 
-function isWordChar(char: string | undefined): boolean {
+export function isWordChar(char: string | undefined): boolean {
   return char !== undefined && /[\w$]/.test(char)
 }
 
@@ -142,5 +142,3 @@ export class Trivia {
     return this.src[next] === ';'
   }
 }
-
-export { isWordChar }
