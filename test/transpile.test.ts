@@ -316,6 +316,28 @@ describe('transpile', () => {
     expect(Ex).toEqual({ A: 0, 0: 'A' })
   })
 
+  it('erases exported overload signatures with the whole statement', () => {
+    // Given: an exported overload signature — oxc wraps it as an
+    // ExportNamedDeclaration around a bodyless TSDeclareFunction
+    const input = 'export function f(): void;\nexport declare function g(): void;\n'
+    // When: transpiled
+    const output = transpile(input)
+    // Then: the `export` keyword does not survive erasure
+    expect(output).toEqual(tsBlankSpace(input))
+    expect(output.startsWith(`${' '.repeat(26)}\n`)).toBe(true)
+    expect(parseSync('input.js', output).errors).toEqual([])
+  })
+
+  it('erases default-exported overload signatures with the whole statement', () => {
+    // Given: a default-exported overload signature
+    const input = 'export default function f(): void;'
+    // When: transpiled
+    const output = transpile(input)
+    // Then: the `export default` keyword does not survive erasure
+    expect(output).toEqual(tsBlankSpace(input))
+    expect(output).toBe(' '.repeat(input.length))
+  })
+
   it('produces output that parses as valid JavaScript', () => {
     // Given: a mixed bag of erasable TypeScript
     const input = [

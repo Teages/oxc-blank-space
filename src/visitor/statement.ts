@@ -84,19 +84,17 @@ function visitExportedDeclaration(
       return visitClassLike(blanker, declaration)
     }
     case 'FunctionDeclaration': {
-      if (declaration.body === null) {
-        // Overload signatures are erased plainly, `declare` gets the
-        // ASI-protected variant — mirroring ts-blank-space.
-        if (declaration.declare) {
-          blanker.blankStatement(wrapper)
-        }
-        else {
-          blanker.blankExact(wrapper)
-        }
+      if (declaration.declare) {
+        blanker.blankStatement(wrapper)
         return VISIT_BLANKED
       }
       return visitFunctionLike(blanker, declaration)
     }
+    case 'TSDeclareFunction':
+      // An exported overload signature must take the whole `export` statement
+      // with it — erasing only the declaration would strand the keyword.
+      blanker.blankStatement(wrapper)
+      return VISIT_BLANKED
     case 'TSEnumDeclaration': {
       if (declaration.declare) {
         blanker.blankStatement(wrapper)

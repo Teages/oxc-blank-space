@@ -99,8 +99,15 @@ function visitNode(blanker: Blanker, node: Node): VisitResult {
       // `export = ...` / `import x = require(...)` have runtime behavior.
       blanker.report(node)
       return VISIT_JS
-    case 'ExportDefaultDeclaration':
+    case 'ExportDefaultDeclaration': {
+      if (node.declaration.type === 'TSDeclareFunction') {
+        // `export default function f(): void;` — visiting the declaration
+        // alone would strand the `export default` keyword.
+        blanker.blankStatement(node)
+        return VISIT_BLANKED
+      }
       return blanker.visitNested(node.declaration)
+    }
     case 'VariableDeclaration':
       return visitVariableDeclaration(blanker, node)
     case 'VariableDeclarator':
