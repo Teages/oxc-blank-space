@@ -129,3 +129,96 @@ pub fn transpile_native_sync(
     let filename = resolve_filename(options.as_ref());
     to_napi_result(transpile::transpile(&input, &filename))
 }
+
+#[cfg(test)]
+mod perf_bench {
+    //! Internal performance harness — run with:
+    //! `cargo test --release perf_bench -- --ignored --nocapture`
+    //!
+    //! Reports the parse-only floor, the parse+tokens floor, and the full
+    //! transpile pipeline over the fixture corpus. Timings are min/mean over
+    //! many iterations; use `--release`, debug numbers are meaningless.
+
+    use std::fs;
+    use std::time::Instant;
+
+    use oxc_allocator::Allocator;
+    use oxc_parser::Parser;
+    use oxc_span::SourceType;
+
+    fn corpus() -> String {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test/fixture");
+        let mut out = String::new();
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "ts") {
+                out.push_str(&fs::read_to_string(path).unwrap());
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    fn parse_only(input: &str, tokens: bool) {
+        let allocator = Allocator::default();
+        let source_type = SourceType::from_path("input.ts").unwrap().with_module(true);
+        let parser = Parser::new(&allocator, input, source_type);
+        let ret = if tokens {
+            parser.with_config(oxc_parser::config::TokensParserConfig).parse()
+        } else {
+            parser.parse()
+        };
+        std::hint::black_box((ret.program.body.len(), ret.tokens.len()));
+    }
+
+    fn time_it<F: FnMut()>(iters: usize, mut f: F) -> (u128, u128) {
+        for _ in 0..10 {
+            f();
+        }
+        let mut total = 0u128;
+        let mut min = u128::MAX;
+        for _ in 0..iters {
+            let start = Instant::now();
+            f();
+            let elapsed = start.elapsed().as_nanos();
+            total += elapsed;
+            min = min.min(elapsed);
+        }
+        (min, total / iters as u128)
+    }
+
+    #[test]
+    #[ignore]
+    fn floors_and_pipeline() {
+        let original = corpus();
+        let mut corpus = original.clone();
+        while corpus.len() < 100_000 {
+            corpus.push_str(&original);
+        }
+        println!("input: {} bytes", corpus.len());
+
+        transpile_for_bench(&corpus);
+
+        let iters = 100;
+        let (p_min, p_mean) = time_it(iters, || parse_only(&corpus, false));
+        let (pt_min, pt_mean) = time_it(iters, || parse_only(&corpus, true));
+        let (t_min, t_mean) = time_it(iters, || { transpile_for_bench(&corpus); });
+        println!(
+            "parse-only      min={:>5}us mean={:>5}us",
+            p_min / 1000, p_mean / 1000
+        );
+        println!(
+            "parse+tokens    min={:>5}us mean={:>5}us",
+            pt_min / 1000, pt_mean / 1000
+        );
+        println!(
+            "full transpile  min={:>5}us mean={:>5}us",
+            t_min / 1000, t_mean / 1000
+        );
+    }
+
+    fn transpile_for_bench(input: &str) -> usize {
+        let output = crate::transpile::transpile(input, "input.ts").expect("transpiles");
+        std::hint::black_box(output.code.len() + output.unsupported.len())
+    }
+}
