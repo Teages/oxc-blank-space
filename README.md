@@ -29,14 +29,11 @@ transpile(`enum Color { Red, Green = 5 }`)
 
 `const enum` is expanded the same way: the tool never rewrites use sites, so the enum object must exist at runtime for `CE.A` to keep resolving. Note that enum expansion is the one transformation that may change the output length (and therefore the positions of code after the enum).
 
-### Assertions that would regroup get parentheses
+### Unerasable assertions
 
-Erasing an `as`/`satisfies` whose grouping matters inserts parentheses so semantics are preserved, reusing the erased span so lengths stay equal:
+TypeScript now rejects `as`/`satisfies` assertions whose erasure would change operator grouping — `1 + 1 as T / 2` parses as `(1 + 1 as T) / 2`, but erasing the assertion yields `1 + 1 / 2` (see [TypeScript#63527](https://github.com/microsoft/TypeScript/issues/63527), enforced by oxc 0.135+). Inputs containing such assertions cannot be parsed and are returned unchanged.
 
-```ts
-transpile(`const x = 1 + 1 as T / 2`)
-// 'const x = (1 + 1)    / 2'
-```
+Assertions inside unparenthesized `??`/`&&`/`||` mixes (`a && b as T ?? c`) are kept verbatim and reported through `onError`, mirroring ts-blank-space.
 
 ### Unsupported constructs
 
