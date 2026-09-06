@@ -217,12 +217,147 @@ describe("transpile", () => {
     });
 
     test("returns input unchanged on hard parse failures", () => {
-        // Given: input whose operator grouping oxc cannot recover from
-        const input = "1+1 as T / 2";
+        // Given: input oxc cannot recover a statement list from
+        const input = "let x: = 1";
         // When: transpiled
         const output = transpile(input);
         // Then: the input is returned verbatim
         expect(output).toBe(input);
+    });
+
+    test("wraps `as` expressions whose erasure would change grouping", () => {
+        // Given: an assertion whose base expression is rebinding the `/`
+        const input = "const x = 1 + 1 as T / 2";
+        // When: transpiled
+        const output = transpile(input);
+        // Then: the base expression is wrapped, length is preserved
+        expect(output).toBe("const x = (1 + 1)    / 2");
+        expect(output.length).toBe(input.length);
+        const parsed = parseSync("input.js", output);
+        expect(parsed.errors).toEqual([]);
+        expect(
+            new Function(`return ${output.slice("const x = ".length)}`)(),
+        ).toBe(1);
+    });
+
+    test("wraps `satisfies` expressions the same way", () => {
+        // Given: a satisfies assertion with a following higher-precedence operator
+        const input = "const x = 1 + 1 satisfies T / 2";
+        // When: transpiled
+        const output = transpile(input);
+        // Then: the base expression is wrapped (the longer `satisfies T` span
+        // absorbs the two inserted characters the same way)
+        expect(output).toBe("const x = (1 + 1)           / 2");
+        expect(output.length).toBe(input.length);
+    });
+
+    test("wraps assertions inside unparenthesized ??-mixes", () => {
+        // Given: `a ?? b as T && c` parses as `a ?? (b && c)` in TypeScript
+        const input = "const v = a ?? b as T && c";
+        // When: transpiled
+        const output = transpile(input);
+        // Then: the inner logical expression is wrapped
+        expect(output).toBe("const v = a ?? (b)    && c");
+        expect(output.length).toBe(input.length);
+        const parsed = parseSync("input.js", output);
+        expect(parsed.errors).toEqual([]);
+    });
+
+    test("wraps reversed ??-mixes around their logical left side", () => {
+        // Given: `a && b as T ?? c` parses as `(a && b) ?? c` in TypeScript
+        const input = "const v = a && b as T ?? c";
+        // When: transpiled
+        const output = transpile(input);
+        // Then: the left logical expression is wrapped
+        expect(output).toBe("const v = (a && b)    ?? c");
+        expect(output.length).toBe(input.length);
+    });
+
+    test("erases safe assertions without wrapping", () => {
+        // Given: assertions whose erasure cannot change grouping
+        const input = "const x = a as T + 2";
+        // When: transpiled
+        const output = transpile(input);
+        // Then: no parens are inserted, length preserved
+        expect(output).toBe("const x = a      + 2");
+        expect(output.length).toBe(input.length);
+    });
+
+    test("expands runtime enums into TypeScript-compiler-shaped IIFEs", () => {
+        // Given: an auto-incrementing enum with an explicit value in the middle
+        const input = "enum Color { Red, Green = 5, Blue }";
+        // When: transpiled and evaluated
+        const output = transpile(input);
+        const Color = new Function(`${output}; return Color;`)();
+        // Then: forward and reverse mappings match the TypeScript emitter
+        expect(output).toBe(
+            'var  Color; (function (Color) { Color[Color["Red"] = 0] = "Red"; Color[Color["Green"] = 5] = "Green"; Color[Color["Blue"] = 6] = "Blue" })(Color || (Color = {}));',
+        );
+        expect(Color).toEqual({
+            Red: 0,
+            Green: 5,
+            Blue: 6,
+            0: "Red",
+            5: "Green",
+            6: "Blue",
+        });
+    });
+
+    test("expands string enums without reverse mapping", () => {
+        // Given: a string enum
+        const input = 'enum S { A = "x", B = "y" }';
+        // When: transpiled and evaluated
+        const output = transpile(input);
+        const S = new Function(`${output}; return S;`)();
+        // Then: plain property assignments, matching the TypeScript emitter
+        expect(output).toBe(
+            'var  S; (function (S) { S["A"] = "x"; S["B"] = "y" })(S || (S = {}));',
+        );
+        expect(S).toEqual({ A: "x", B: "y" });
+    });
+
+    test("resolves member references inside enum initializers", () => {
+        // Given: members referencing earlier members and non-constant values
+        const input = 'enum E { A, B = A, C = B + 1, D = "d".length, F = D }';
+        // When: transpiled and evaluated
+        const output = transpile(input);
+        const E = new Function(`${output}; return E;`)();
+        // Then: references are qualified with the enum name and stay correct
+        expect(output).toContain('E[E["F"] = E.D] = "F"');
+        expect(E).toEqual({
+            A: 0,
+            B: 0,
+            C: 1,
+            D: 1,
+            F: 1,
+            0: "B",
+            1: "F",
+        });
+    });
+
+    test("expands const enums so untouched use sites keep working", () => {
+        // Given: a const enum with a use site that the tool never rewrites
+        const input = "const enum CE { A, B = A + 3 }\nconst use = CE.B;";
+        // When: transpiled and evaluated
+        const output = transpile(input);
+        const use = new Function(`${output}; return use;`)();
+        // Then: the enum object exists and the use site resolves
+        expect(use).toBe(3);
+    });
+
+    test("expands exported enums under their export keyword", () => {
+        // Given: an exported enum
+        const input = "export enum Ex { A }";
+        // When: transpiled
+        const output = transpile(input);
+        // Then: the export keyword is kept and the enum is expanded
+        expect(output).toBe(
+            'export var  Ex; (function (Ex) { Ex[Ex["A"] = 0] = "A" })(Ex || (Ex = {}));',
+        );
+        const Ex = new Function(
+            `${output.replace("export ", "")}; return Ex;`,
+        )();
+        expect(Ex).toEqual({ A: 0, 0: "A" });
     });
 
     test("produces output that parses as valid JavaScript", () => {

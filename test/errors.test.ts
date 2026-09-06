@@ -16,20 +16,6 @@ describe("unsupported syntax", () => {
         return { output, reported };
     };
 
-    test("errors on enums and keeps them", () => {
-        // Given: a runtime enum
-        const input = "enum E1 { A }\nexport enum E2 { B }\n";
-        // When: transpiled
-        const { output, reported } = collect(input);
-        // Then: two errors, source preserved, matching the reference tool
-        expect(output).toBe(input);
-        expect(output).toEqual(tsBlankSpace(input, () => {}));
-        expect(reported.length).toBe(2);
-        expect(reported.every((r) => r.startsWith("TSEnumDeclaration@"))).toBe(
-            true,
-        );
-    });
-
     test("allows ambient enums", () => {
         // Given: a declare enum
         const input = "declare enum E1 {}\n";
@@ -111,17 +97,6 @@ describe("unsupported syntax", () => {
         expect(reported.length).toBe(1);
     });
 
-    test("errors when erasing an `as` would change ??-mixing", () => {
-        // Given: an assertion inside an unparenthesized ??/|| mix
-        const input = "a ?? b as any || 2";
-        // When: transpiled
-        const { output, reported } = collect(input);
-        // Then: error + source preserved, matching the reference tool
-        expect(output).toBe(input);
-        expect(output).toEqual(tsBlankSpace(input, () => {}));
-        expect(reported.length).toBe(1);
-    });
-
     test("allows safe assertions inside logical chains", () => {
         // Given: assertions that do not change grouping when erased
         const input =
@@ -136,12 +111,12 @@ describe("unsupported syntax", () => {
     });
 
     test("reports span information usable for diagnostics", () => {
-        // Given: an enum at a known offset
-        const input = "\n  enum E { A }\n";
+        // Given: a constructor parameter property at a known offset
+        const input = "class C { constructor(private a: string) {} }\n";
         // When: transpiled
         const { reported } = collect(input);
-        // Then: the reported span covers the declaration
-        expect(reported).toEqual(["TSEnumDeclaration@3-15"]);
-        expect(input.slice(3, 15)).toBe("enum E { A }");
+        // Then: the reported span covers the parameter property
+        expect(reported).toEqual(["TSParameterProperty@22-39"]);
+        expect(input.slice(22, 39)).toBe("private a: string");
     });
 });
