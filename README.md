@@ -106,23 +106,34 @@ laptop, Node 24:
 
 | input | js | native transpileSync | native transpileAsync |
 | --- | --- | --- | --- |
-| inline snippet | 84.3k ops/s | 483.2k ops/s (5.7x) | 129.1k ops/s (1.5x) |
-| fixture corpus (~15KB) | 1.1k ops/s | 7.3k ops/s (6.6x) | 6.8k ops/s (6.2x) |
-| large (~100KB) | 115 ops/s | 805 ops/s (7.0x) | 817 ops/s (7.1x) |
-| enum heavy | 2.6k ops/s | 8.4k ops/s (3.2x) | 7.6k ops/s (2.9x) |
+| inline snippet | 83.6k ops/s | 530.9k ops/s (6.4x) | 137.2k ops/s (1.6x) |
+| fixture corpus (~15KB) | 1.1k ops/s | 9.1k ops/s (8.2x) | 8.2k ops/s (7.4x) |
+| large (~100KB) | 116 ops/s | 1.0k ops/s (8.8x) | 1.0k ops/s (9.0x) |
+| enum heavy | 2.5k ops/s | 8.9k ops/s (3.5x) | 7.9k ops/s (3.1x) |
 
 The gap against the JS implementation comes from keeping the whole
 parse-and-blank pipeline in Rust: the JS implementation pays for transferring
 the oxc AST into JavaScript objects and walking it dynamically, while the
-native entries walk the typed AST in place.
+native entries walk the typed AST in place. The native crate also enables
+`TokensParserConfig` so exact token lookups replace the trivia byte-scanning
+of the JS version, builds the output in one exactly-sized buffer, and pools
+its arena allocators across calls.
 
 Sync vs async has its own gap, driven by the per-call fixed cost of the napi
 thread-pool hop (dispatch + promise plumbing, roughly 5µs here): on the tiny
-inline input `transpileSync` is ~3.6x faster than `transpileAsync`; from the
-~15KB fixture corpus upward the two converge to within a few percent
-(1.0–1.1x), and at ~100KB the async entry is fully on par while keeping the
-main thread free. Rule of thumb: use `transpileSync` for small, frequent
-inputs; `transpileAsync` once inputs are non-trivial or concurrency matters.
+inline input `transpileSync` is ~3.9x faster than `transpileAsync`; from the
+~15KB fixture corpus upward the two converge to within ~10% (large input:
+on par, with the async entry keeping the main thread free). Rule of thumb:
+use `transpileSync` for small, frequent inputs; `transpileAsync` once inputs
+are non-trivial or concurrency matters.
+
+`native/src/lib.rs` contains an `#[ignore]`d measurement harness for the
+Rust-side numbers — run it with
+`cargo test --release perf_bench -- --ignored --nocapture` from `native/`.
+It reports the pipeline against its floor: a plain oxc parse of the same
+input (~730µs pipeline vs ~410µs parse floor over 111KB, i.e. ~1.8x; the
+remaining gap is the arena AST allocation upstream oxc always performs,
+which a no-AST fork like oxidase avoids at the cost of forking the parser).
 
 ## Comparison with ts-blank-space
 
