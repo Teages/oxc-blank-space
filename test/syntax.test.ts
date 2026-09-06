@@ -212,12 +212,11 @@ describe('assertion hazards', () => {
     expect(reported).toBe(1)
   })
 
-  it('keeps assertion chains over binary bases verbatim', () => {
-    // Given: a doubly-asserted binary base whose erasure would rebind `*`
+  it('throws on assertion chains over binary bases', () => {
+    // Given: a doubly-asserted binary base whose erasure would rebind `*` —
+    // TypeScript and oxc both reject it, so it fails at parse time
     const input = 'const x = a + b as T as U * c;\n'
-    // When: transpiled
-    const { output } = transpiled(input)
-    // Then: output matches the reference tool
-    expect(output).toEqual(tsBlankSpace(input, () => {}))
+    // When/Then: the parse failure surfaces as a SyntaxError
+    expect(() => transpile(input)).toThrow(SyntaxError)
   })
 })

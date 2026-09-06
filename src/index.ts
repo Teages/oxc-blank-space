@@ -16,9 +16,11 @@ export type { OnError, TranspileOptions, UnsupportedSyntax } from './types'
  * ```
  *
  * Runtime TypeScript features (enums, namespaces with runtime code, parameter
- * properties, `export =`, `import x = require(...)`, `<T>expr` assertions and
- * `as` erasures that would change operator grouping) cannot be blanked: they
- * are kept verbatim and reported through `options.onError`.
+ * properties, `export =`, `import x = require(...)` and `<T>expr` assertions)
+ * cannot be blanked: they are kept verbatim and reported through
+ * `options.onError`. Inputs that are not valid TypeScript — including `as`/
+ * `satisfies` erasures that would change operator grouping, which TypeScript
+ * itself rejects — throw a `SyntaxError`.
  */
 export function transpile(
   input: string,
@@ -27,11 +29,16 @@ export function transpile(
   const filename = options.lang === 'tsx' ? 'input.tsx' : 'input.ts'
   const parsed = parseSync(filename, input, { sourceType: 'module' })
 
-  // Hard parse failures leave no usable AST; keep the input untouched. (Soft
-  // parse errors still produce a recovered AST, which we process like
+  // Hard parse failures leave no usable AST: the input is not valid
+  // TypeScript, so surface it as a syntax error rather than silently
+  // passing TypeScript through as if it were JavaScript. (Soft parse
+  // errors still produce a recovered AST, which we process like
   // ts-blank-space does for TypeScript's recovered trees.)
   if (parsed.program.body.length === 0 && parsed.errors.length > 0) {
-    return input
+    const details = parsed.errors
+      .map(error => error.codeframe || error.message)
+      .join('\n')
+    throw new SyntaxError(`failed to parse ${filename}:\n${details}`)
   }
 
   return blankProgram(

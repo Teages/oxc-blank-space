@@ -216,17 +216,29 @@ describe('transpile', () => {
     expect(output.length).toBe(input.length)
   })
 
-  it('returns input unchanged on hard parse failures', () => {
-    // Given: input oxc cannot recover a statement list from. Unerasable
-    // `as`/`satisfies` assertions (TypeScript#63527) are such input since
-    // oxc 0.135 — TypeScript itself now rejects them as syntax errors.
+  it('throws a SyntaxError on input oxc cannot parse', () => {
+    // Given: input oxc cannot recover a statement list from
+    const input = 'let x: = 1'
+    // When/Then: the failure surfaces as a SyntaxError
+    expect(() => transpile(input)).toThrow(SyntaxError)
+    expect(() => transpile(input)).toThrow(/input\.ts/)
+  })
+
+  it('throws on grouping-unsafe assertions like TypeScript does', () => {
+    // Given: an `as` erasure that would rebind the `/` (TypeScript#63527) —
+    // invalid to both TypeScript and oxc, so it never reaches the erasure
+    // logic
     const input = 'const x = 1 + 1 as T / 2'
-    // When: transpiled
-    const output = transpile(input)
-    // Then: the input is returned verbatim, matching ts-blank-space output
-    const reference = tsBlankSpace(input, () => {})
-    expect(output).toBe(reference)
-    expect(output).toBe(input)
+    // When/Then: the parse failure is surfaced as a SyntaxError instead of a
+    // silent passthrough
+    expect(() => transpile(input)).toThrow(SyntaxError)
+  })
+
+  it('throws on unparseable input even when other statements are valid', () => {
+    // Given: a file mixing erasable assertions with one invalid statement
+    const input = 'const a = 1 as T;\nlet y: = 2;\nconst b = 2 as U;\n'
+    // When/Then: no silent partial passthrough
+    expect(() => transpile(input)).toThrow(SyntaxError)
   })
 
   it('erases safe assertions without wrapping', () => {
