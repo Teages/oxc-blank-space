@@ -5,11 +5,6 @@ export default antfu(
     ignores: ['test/fixture/**'],
   },
   {
-    rules: {
-      curly: ['error', 'all'],
-    },
-  },
-  {
     files: ['test/**/*.test.ts'],
     rules: {
       // the suite evaluates transpiler output and asserts on template-shaped
