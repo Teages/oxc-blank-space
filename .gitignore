@@ -1,3 +1,7 @@
-node_modules/
-dist/
-*.tsbuildinfo
+node_modules
+coverage
+dist
+.DS_Store
+.eslintcache
+*.log*
+*.env*

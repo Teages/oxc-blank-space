@@ -1,42 +1,60 @@
 {
-    "name": "@teages/oxc-blank-space",
-    "description": "A type-stripper that blanks TypeScript-only syntax using the oxc parser, preserving line and column positions.",
-    "version": "0.1.0",
-    "license": "Apache-2.0",
-    "type": "module",
-    "main": "./dist/index.js",
-    "module": "./dist/index.js",
-    "types": "./dist/index.d.ts",
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/index.js",
-            "require": "./dist/index.cjs"
-        },
-        "./package.json": "./package.json"
-    },
-    "files": [
-        "dist"
-    ],
-    "engines": {
-        "node": ">=18.0.0"
-    },
-    "scripts": {
-        "build": "tsup",
-        "test": "bun test",
-        "typecheck": "tsc --noEmit",
-        "lint": "biome check .",
-        "lint:fix": "biome check --write .",
-        "prepack": "pnpm build"
-    },
-    "dependencies": {
-        "oxc-parser": "^0.148.0"
-    },
-    "devDependencies": {
-        "@biomejs/biome": "^2.5.0",
-        "@types/bun": "^1.2.0",
-        "ts-blank-space": "^0.9.0",
-        "tsup": "^8.0.0",
-        "typescript": "^5.9.0"
+  "name": "@teages/oxc-blank-space",
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.1.2",
+  "description": "A type-stripper that blanks TypeScript-only syntax using the oxc parser, preserving line and column positions.",
+  "license": "Apache-2.0",
+  "repository": "Teages/oxc-blank-space",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
+  },
+  "module": "./dist/index.mjs",
+  "typesVersions": {
+    "*": {
+      ".": [
+        "./dist/index.d.mts"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "obuild",
+    "play:prepare": "obuild --stub",
+    "play": "pnpm -C playground play",
+    "dev": "vitest dev",
+    "lint": "eslint --cache .",
+    "lint:fix": "eslint --cache --fix .",
+    "prepack": "pnpm build",
+    "release": "pnpm test && changelogen --release --push && pnpm publish",
+    "test": "pnpm lint && pnpm test:types && vitest run --coverage",
+    "test:types": "tsc --noEmit --skipLibCheck"
+  },
+  "dependencies": {
+    "oxc-parser": "^0.148.0"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^9.0.0",
+    "@types/node": "^24.12.4",
+    "@vitest/coverage-v8": "^4.1.6",
+    "changelogen": "^0.6.2",
+    "eslint": "^10.3.0",
+    "jiti": "2.7.0",
+    "obuild": "^0.4.35",
+    "ts-blank-space": "^0.9.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
