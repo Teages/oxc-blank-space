@@ -46,9 +46,9 @@ Truly unsupported constructs are kept verbatim and reported through `onError`:
 
 ```ts
 transpile(`class C { constructor(private a: string) {} }`, {
-    onError: (node) => {
-        // node.type === 'TSParameterProperty', node.start / node.end offsets
-    },
+  onError: (node) => {
+    // node.type === 'TSParameterProperty', node.start / node.end offsets
+  },
 })
 ```
 
@@ -57,13 +57,13 @@ Inputs oxc cannot parse at all are returned unchanged.
 ## API
 
 ```ts
-function transpile(input: string, options?: TranspileOptions): string;
+function transpile(input: string, options?: TranspileOptions): string
 
 interface TranspileOptions {
-    /** Called once per unsupported construct. */
-    onError?: (node: { type: string; start: number; end: number }) => void;
-    /** Parse as plain `ts` (default) or `tsx`. */
-    lang?: 'ts' | 'tsx';
+  /** Called once per unsupported construct. */
+  onError?: (node: { type: string, start: number, end: number }) => void
+  /** Parse as plain `ts` (default) or `tsx`. */
+  lang?: 'ts' | 'tsx'
 }
 ```
 
@@ -79,13 +79,14 @@ interface TranspileOptions {
 
 ```bash
 pnpm install
-pnpm test        # bun test — unit tests + ts-blank-space fixture corpus
-pnpm typecheck   # tsc --noEmit
-pnpm lint        # biome
-pnpm build       # tsup → dist (ESM + CJS + types)
+pnpm test        # eslint + tsc --noEmit + vitest run --coverage
+pnpm lint        # eslint (antfu config), lint:fix to auto-fix
+pnpm build       # obuild → dist (ESM + types)
+pnpm play        # run the playground against a stub build
+pnpm release     # changelogen release + publish
 ```
 
-The test suite includes the upstream fixture corpus (`test/fixture`) and asserts that every output matches `ts-blank-space` byte for byte.
+The test suite includes the upstream fixture corpus (`test/fixture`) and asserts that every output matches `ts-blank-space` byte for byte. CI (`.github/workflows`) runs lint, typecheck, build and coverage on every PR.
 
 ## License
 
