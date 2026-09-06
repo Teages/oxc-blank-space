@@ -1,7 +1,7 @@
 import type { Comment, Node, Program } from 'oxc-parser'
 import type { OnError, VisitResult } from './types.js'
 import { visitorKeys } from 'oxc-parser'
-import { Blanker } from './blanker.js'
+import { Blanker } from './core/blanker.js'
 import { visitModuleStatement } from './namespace-value.js'
 import {
 

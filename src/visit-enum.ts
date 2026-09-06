@@ -1,5 +1,5 @@
 import type { Node, TSEnumDeclaration, TSEnumMember } from 'oxc-parser'
-import type { Blanker } from './blanker.js'
+import type { Blanker } from './core/blanker.js'
 import type { VisitResult } from './types.js'
 import { visitorKeys } from 'oxc-parser'
 import { VISIT_BLANKED, VISIT_JS } from './types.js'

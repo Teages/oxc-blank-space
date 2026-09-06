@@ -1,5 +1,5 @@
 import type { Node } from 'oxc-parser'
-import type { Blanker } from './blanker.js'
+import type { Blanker } from './core/blanker.js'
 import type { VisitResult } from './types.js'
 import { VISIT_JS } from './types.js'
 
