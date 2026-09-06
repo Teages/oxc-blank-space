@@ -1,0 +1,14 @@
+{
+  "name": "playground",
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "play": "jiti ."
+  },
+  "dependencies": {
+    "@teages/oxc-blank-space": "workspace:*"
+  },
+  "devDependencies": {
+    "jiti": "2.7.0"
+  }
+}
