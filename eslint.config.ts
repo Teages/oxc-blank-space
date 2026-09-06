@@ -2,7 +2,7 @@ import antfu from '@antfu/eslint-config'
 
 export default antfu(
   {
-    ignores: ['test/fixture/**'],
+    ignores: ['test/fixture/**', 'native/**'],
   },
   {
     files: ['test/**/*.test.ts'],
