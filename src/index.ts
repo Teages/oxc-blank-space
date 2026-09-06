@@ -1,6 +1,6 @@
 import type { TranspileOptions } from './types.js'
 import { parseSync } from 'oxc-parser'
-import { blankProgram } from './walk.js'
+import { blankProgram } from './visitor/walk.js'
 
 export type { OnError, TranspileOptions, UnsupportedSyntax } from './types.js'
 

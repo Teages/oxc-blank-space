@@ -1,16 +1,15 @@
 import type { Comment, Node, Program } from 'oxc-parser'
-import type { OnError, VisitResult } from './types.js'
+import type { OnError, VisitResult } from '../types.js'
 import { visitorKeys } from 'oxc-parser'
-import { Blanker } from './core/blanker.js'
-import { visitModuleStatement } from './namespace-value.js'
+import { Blanker } from '../core/blanker.js'
 import {
 
   VISIT_BLANKED,
   VISIT_JS,
 
-} from './types.js'
-import { visitClassLike, visitClassMember } from './visit-class.js'
-import { visitEnumDeclaration } from './visit-enum.js'
+} from '../types.js'
+import { visitClassLike, visitClassMember } from './class.js'
+import { visitEnumDeclaration } from './enum.js'
 import {
   visitCallOrNew,
   visitLogicalExpression,
@@ -18,14 +17,15 @@ import {
   visitTaggedTemplate,
   visitTypeAssertion,
   visitTypeAssertionStatement,
-} from './visit-expression.js'
-import { visitFunctionLike } from './visit-function.js'
-import { visitPattern, visitVariableDeclarator } from './visit-pattern.js'
+} from './expression.js'
+import { visitFunctionLike } from './function.js'
+import { visitModuleStatement } from './namespace.js'
+import { visitPattern, visitVariableDeclarator } from './pattern.js'
 import {
   visitExportNamedDeclaration,
   visitImportDeclaration,
   visitVariableDeclaration,
-} from './visit-statement.js'
+} from './statement.js'
 
 /**
  * Statement and declaration kinds, mirroring TypeScript's `isStatement`: the
