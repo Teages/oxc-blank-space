@@ -69,6 +69,61 @@ interface TranspileOptions {
 }
 ```
 
+## Experimental native entry point
+
+`@teages/oxc-blank-space/experimental-native` exposes the same transpilation as
+a Rust implementation (this repo rewritten in Rust, living under `native/`),
+as a synchronous/async pair — `transpileSync` runs the pipeline on the calling
+thread, `transpileAsync` runs it on a background thread. Either way the oxc AST
+never crosses into JavaScript:
+
+```ts
+import { transpileAsync, transpileSync } from '@teages/oxc-blank-space/experimental-native'
+
+transpileSync(`const a: number = 1`)
+// 'const a         = 1'
+await transpileAsync(`const a: number = 1`)
+// 'const a         = 1'
+```
+
+Both accept the same `TranspileOptions` as `transpile` (including `onError`,
+which is invoked with the kept-verbatim unsupported constructs after
+transpilation) and throw a `SyntaxError` when the input cannot be parsed — the
+async entry rejects. `nativeBindingAvailable` reports whether the binary has
+been built; the entry throws on use otherwise. The output is byte-for-byte
+identical to the JS implementation; `test/native.test.ts` asserts this against
+the fixture corpus and inline cases.
+
+> [!NOTE]
+> Experimental: both entries report `onError` after transpilation rather than
+> during it, and the binary must be built per-platform (`pnpm build:native`).
+
+## Benchmark
+
+`pnpm bench` runs `bench/transpile.bench.ts` (vitest bench) comparing the JS
+implementation against both native entries. Measured on an Apple M-series
+laptop, Node 24:
+
+| input | js | native transpileSync | native transpileAsync |
+| --- | --- | --- | --- |
+| inline snippet | 84.3k ops/s | 483.2k ops/s (5.7x) | 129.1k ops/s (1.5x) |
+| fixture corpus (~15KB) | 1.1k ops/s | 7.3k ops/s (6.6x) | 6.8k ops/s (6.2x) |
+| large (~100KB) | 115 ops/s | 805 ops/s (7.0x) | 817 ops/s (7.1x) |
+| enum heavy | 2.6k ops/s | 8.4k ops/s (3.2x) | 7.6k ops/s (2.9x) |
+
+The gap against the JS implementation comes from keeping the whole
+parse-and-blank pipeline in Rust: the JS implementation pays for transferring
+the oxc AST into JavaScript objects and walking it dynamically, while the
+native entries walk the typed AST in place.
+
+Sync vs async has its own gap, driven by the per-call fixed cost of the napi
+thread-pool hop (dispatch + promise plumbing, roughly 5µs here): on the tiny
+inline input `transpileSync` is ~3.6x faster than `transpileAsync`; from the
+~15KB fixture corpus upward the two converge to within a few percent
+(1.0–1.1x), and at ~100KB the async entry is fully on par while keeping the
+main thread free. Rule of thumb: use `transpileSync` for small, frequent
+inputs; `transpileAsync` once inputs are non-trivial or concurrency matters.
+
 ## Comparison with ts-blank-space
 
 | | ts-blank-space | @teages/oxc-blank-space |
@@ -83,7 +138,9 @@ interface TranspileOptions {
 pnpm install
 pnpm test        # eslint + tsc --noEmit + vitest run --coverage
 pnpm lint        # eslint (antfu config), lint:fix to auto-fix
-pnpm build       # obuild → dist (ESM + types)
+pnpm build       # obuild → dist (ESM + types) + napi release build
+pnpm build:native  # napi build --release → dist/*.node (required for tests/bench)
+pnpm bench       # vitest bench: js vs native implementations
 pnpm play        # run the playground against a stub build
 pnpm release     # changelogen release + publish
 ```
