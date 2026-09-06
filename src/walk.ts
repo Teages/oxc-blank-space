@@ -8,6 +8,7 @@ import {
     type VisitResult,
 } from "./types.js";
 import { visitClassLike, visitClassMember } from "./visit-class.js";
+import { visitEnumDeclaration } from "./visit-enum.js";
 import {
     visitCallOrNew,
     visitLogicalExpression,
@@ -19,7 +20,6 @@ import {
 import { visitFunctionLike } from "./visit-function.js";
 import { visitPattern, visitVariableDeclarator } from "./visit-pattern.js";
 import {
-    visitEnumDeclaration,
     visitExportNamedDeclaration,
     visitImportDeclaration,
     visitVariableDeclaration,

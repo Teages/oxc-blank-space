@@ -9,6 +9,7 @@ import type { Blanker } from "./blanker.js";
 import { shouldBlankModule } from "./namespace-value.js";
 import { VISIT_BLANKED, VISIT_JS, type VisitResult } from "./types.js";
 import { visitClassLike } from "./visit-class.js";
+import { expandEnum } from "./visit-enum.js";
 import { visitFunctionLike } from "./visit-function.js";
 
 export function visitImportDeclaration(
@@ -100,7 +101,7 @@ function visitExportedDeclaration(
                 blanker.blankStatement(wrapper);
                 return VISIT_BLANKED;
             }
-            blanker.report(declaration);
+            expandEnum(blanker, declaration);
             return VISIT_JS;
         }
         case "TSModuleDeclaration": {
