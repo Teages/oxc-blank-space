@@ -64,6 +64,8 @@ interface TranspileOptions {
   onError?: (node: { type: string, start: number, end: number }) => void
   /** Parse as plain `ts` (default) or `tsx`. */
   lang?: 'ts' | 'tsx'
+  /** Source path quoted in parse diagnostics; a `.tsx` extension enables JSX. */
+  filename?: string
 }
 ```
 

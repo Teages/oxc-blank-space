@@ -24,6 +24,13 @@ export interface TranspileOptions {
    * Parse the input as `ts` (default) or `tsx`.
    */
   readonly lang?: 'ts' | 'tsx'
+  /**
+   * Source path quoted in the diagnostics of the `SyntaxError` thrown when
+   * the input cannot be parsed. The extension also selects the parse mode
+   * (a `.tsx` filename enables JSX), so `lang` is only consulted to
+   * synthesize a fallback name when this is omitted.
+   */
+  readonly filename?: string
 }
 
 export interface ParseArtifacts {

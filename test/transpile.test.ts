@@ -224,6 +224,25 @@ describe('transpile', () => {
     expect(() => transpile(input)).toThrow(/input\.ts/)
   })
 
+  it('labels parse diagnostics with the provided filename', () => {
+    // Given: invalid input and a caller-supplied source path
+    const input = 'let x: = 1'
+    // When/Then: the thrown diagnostics quote that path
+    expect(() => transpile(input, { filename: 'src/app.ts' })).toThrow(
+      /src\/app\.ts/,
+    )
+  })
+
+  it('infers tsx parsing from a .tsx filename', () => {
+    // Given: JSX input without the lang option
+    const input = 'const elm = <div>{x as string}</div>;\n'
+    // When: transpiled with a .tsx filename
+    const output = transpile(input, { filename: 'component.tsx' })
+    // Then: the assertion is erased and the JSX stays intact
+    expect(output).toBe('const elm = <div>{x          }</div>;\n')
+    expect(output.length).toBe(input.length)
+  })
+
   it('throws on grouping-unsafe assertions like TypeScript does', () => {
     // Given: an `as` erasure that would rebind the `/` (TypeScript#63527) —
     // invalid to both TypeScript and oxc, so it never reaches the erasure

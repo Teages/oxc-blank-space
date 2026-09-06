@@ -26,7 +26,8 @@ export function transpile(
   input: string,
   options: TranspileOptions = {},
 ): string {
-  const filename = options.lang === 'tsx' ? 'input.tsx' : 'input.ts'
+  const filename
+    = options.filename ?? (options.lang === 'tsx' ? 'input.tsx' : 'input.ts')
   const parsed = parseSync(filename, input, { sourceType: 'module' })
 
   // Hard parse failures leave no usable AST: the input is not valid
