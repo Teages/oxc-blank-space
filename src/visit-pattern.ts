@@ -7,11 +7,9 @@ export function visitVariableDeclarator(
     node: Extract<Node, { type: "VariableDeclarator" }>,
 ): VisitResult {
     if (node.definite) {
-        blankMarkerChar(
-            blanker,
-            node.id.typeAnnotation?.start ?? node.id.end,
-            "!",
-        );
+        const annotation = (node.id as Node & { typeAnnotation?: Node | null })
+            .typeAnnotation;
+        blankMarkerChar(blanker, annotation?.start ?? node.id.end, "!");
     }
     visitPattern(blanker, node.id);
     if (node.init) {
