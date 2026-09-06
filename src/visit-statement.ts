@@ -2,7 +2,6 @@ import type {
   ExportNamedDeclaration,
   ImportDeclaration,
   Node,
-  TSEnumDeclaration,
   VariableDeclaration,
 } from 'oxc-parser'
 import type { Blanker } from './blanker.js'
@@ -133,18 +132,5 @@ export function visitVariableDeclaration(
   }
   blanker.visitNodeArray(node.declarations, false, false, declarator =>
     blanker.visitNode(declarator))
-  return VISIT_JS
-}
-
-export function visitEnumDeclaration(
-  blanker: Blanker,
-  node: TSEnumDeclaration,
-): VisitResult {
-  if (node.declare) {
-    blanker.blankStatement(node)
-    return VISIT_BLANKED
-  }
-  // Enums have runtime behavior; keep the source and report.
-  blanker.report(node)
   return VISIT_JS
 }
