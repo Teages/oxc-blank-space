@@ -31,7 +31,7 @@ transpile(`enum Color { Red, Green = 5 }`)
 
 ### Unerasable assertions
 
-TypeScript now rejects `as`/`satisfies` assertions whose erasure would change operator grouping — `1 + 1 as T / 2` parses as `(1 + 1 as T) / 2`, but erasing the assertion yields `1 + 1 / 2` (see [TypeScript#63527](https://github.com/microsoft/TypeScript/issues/63527), enforced by oxc 0.135+). Inputs containing such assertions cannot be parsed and are returned unchanged.
+TypeScript now rejects `as`/`satisfies` assertions whose erasure would change operator grouping — `1 + 1 as T / 2` parses as `(1 + 1 as T) / 2`, but erasing the assertion yields `1 + 1 / 2` (see [TypeScript#63527](https://github.com/microsoft/TypeScript/issues/63527), enforced by oxc 0.135+). Inputs containing such assertions cannot be parsed: `transpile()` throws a `SyntaxError` carrying the parser's diagnostics.
 
 Assertions inside unparenthesized `??`/`&&`/`||` mixes (`a && b as T ?? c`) are kept verbatim and reported through `onError`, mirroring ts-blank-space.
 
@@ -52,7 +52,7 @@ transpile(`class C { constructor(private a: string) {} }`, {
 })
 ```
 
-Inputs oxc cannot parse at all are returned unchanged.
+Inputs oxc cannot parse at all throw a `SyntaxError` carrying the parser's diagnostics — invalid TypeScript is never silently passed through as if it were JavaScript.
 
 ## API
 
