@@ -35,7 +35,6 @@
     "lint": "eslint --cache .",
     "lint:fix": "eslint --cache --fix .",
     "prepack": "pnpm build",
-    "release": "pnpm test && changelogen --release --push && pnpm publish",
     "test": "pnpm lint && pnpm test:types && vitest run --coverage",
     "test:types": "tsc --noEmit --skipLibCheck"
   },
@@ -46,7 +45,6 @@
     "@antfu/eslint-config": "^9.0.0",
     "@types/node": "^24.12.4",
     "@vitest/coverage-v8": "^4.1.6",
-    "changelogen": "^0.6.2",
     "eslint": "^10.3.0",
     "jiti": "2.7.0",
     "obuild": "^0.4.35",
