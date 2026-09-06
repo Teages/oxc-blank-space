@@ -97,10 +97,22 @@ describe("unsupported syntax", () => {
         expect(reported.length).toBe(1);
     });
 
+    test("errors on `as` inside unparenthesized ??-mixes", () => {
+        // Given: an assertion inside a `??`/`&&` mix, which TypeScript rejects
+        // (ts(5076)) and whose erasure would silently change the parse
+        const input = "const v = a && b as T ?? c;\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: error + source preserved, matching the reference tool
+        expect(output).toBe(input);
+        expect(output).toEqual(tsBlankSpace(input, () => {}));
+        expect(reported.length).toBe(1);
+    });
+
     test("allows safe assertions inside logical chains", () => {
         // Given: assertions that do not change grouping when erased
         const input =
-            "const v = a && (b as T) ?? c;\nconst w = x || y satisfies Z;\n";
+            "const w = x || y satisfies Z;\nconst v = a && (b as T) + c;\n";
         // When: transpiled
         const { output, reported } = collect(input);
         // Then: they are erased without errors
