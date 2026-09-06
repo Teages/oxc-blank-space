@@ -1,0 +1,147 @@
+import { describe, expect, test } from "bun:test";
+import tsBlankSpace from "ts-blank-space";
+import { transpile } from "../src/index.js";
+
+/**
+ * Unsupported constructs keep their source verbatim in the output (mirroring
+ * ts-blank-space) and are reported through `onError`.
+ */
+describe("unsupported syntax", () => {
+    const collect = (input: string): { output: string; reported: string[] } => {
+        const reported: string[] = [];
+        const output = transpile(input, {
+            onError: (node) =>
+                reported.push(`${node.type}@${node.start}-${node.end}`),
+        });
+        return { output, reported };
+    };
+
+    test("errors on enums and keeps them", () => {
+        // Given: a runtime enum
+        const input = "enum E1 { A }\nexport enum E2 { B }\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: two errors, source preserved, matching the reference tool
+        expect(output).toBe(input);
+        expect(output).toEqual(tsBlankSpace(input, () => {}));
+        expect(reported.length).toBe(2);
+        expect(reported.every((r) => r.startsWith("TSEnumDeclaration@"))).toBe(
+            true,
+        );
+    });
+
+    test("allows ambient enums", () => {
+        // Given: a declare enum
+        const input = "declare enum E1 {}\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: it is blanked without errors
+        expect(output).toBe("                  \n");
+        expect(reported).toEqual([]);
+    });
+
+    test("errors on constructor parameter properties", () => {
+        // Given: parameter properties of all four kinds
+        const input =
+            "class C {\n  constructor(public a, private b, protected c, readonly d) {}\n}\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: one report per parameter property, source preserved
+        expect(output).toBe(input);
+        expect(reported.length).toBe(4);
+        expect(
+            reported.every((r) => r.startsWith("TSParameterProperty@")),
+        ).toBe(true);
+    });
+
+    test("errors on legacy `module` declarations", () => {
+        // Given: `module` declarations (overlap with the TC39 modules proposal)
+        const input =
+            "module A {}\nmodule B { export type T = string; }\ndeclare module M {}\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: all three error; only string-named ambient modules may blank
+        expect(output).toBe(input);
+        expect(reported.length).toBe(3);
+    });
+
+    test("errors on instantiated namespaces", () => {
+        // Given: namespaces holding runtime values
+        const input =
+            "namespace A { 1; }\nnamespace C { export let x; }\nnamespace G.H { 4; }\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: one error per outer namespace (dotted names count once)
+        expect(output).toBe(input);
+        expect(reported.length).toBe(3);
+    });
+
+    test("silently erases type-only namespaces", () => {
+        // Given: a namespace whose body imports a type alias
+        const input = "namespace B { import x = A.x; }\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: the namespace is blanked without an error
+        expect(output).not.toContain("namespace");
+        expect(reported).toEqual([]);
+    });
+
+    test("errors on CJS export assignment and import equals", () => {
+        // Given: both CJS interop syntaxes
+        const exportInput = "export = 1;\n";
+        const importInput = 'import lib = require("");\n';
+        // When: transpiled
+        const exportResult = collect(exportInput);
+        const importResult = collect(importInput);
+        // Then: each errors once and keeps the source
+        expect(exportResult.output).toBe(exportInput);
+        expect(exportResult.reported.length).toBe(1);
+        expect(importResult.output).toBe(importInput);
+        expect(importResult.reported.length).toBe(1);
+    });
+
+    test("errors on prefix type assertions", () => {
+        // Given: the legacy `<T>expr` assertion
+        const input = 'let x = <string>"test";\n';
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: error + source preserved, matching the reference tool
+        expect(output).toBe(input);
+        expect(output).toEqual(tsBlankSpace(input, () => {}));
+        expect(reported.length).toBe(1);
+    });
+
+    test("errors when erasing an `as` would change ??-mixing", () => {
+        // Given: an assertion inside an unparenthesized ??/|| mix
+        const input = "a ?? b as any || 2";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: error + source preserved, matching the reference tool
+        expect(output).toBe(input);
+        expect(output).toEqual(tsBlankSpace(input, () => {}));
+        expect(reported.length).toBe(1);
+    });
+
+    test("allows safe assertions inside logical chains", () => {
+        // Given: assertions that do not change grouping when erased
+        const input =
+            "const v = a && (b as T) ?? c;\nconst w = x || y satisfies Z;\n";
+        // When: transpiled
+        const { output, reported } = collect(input);
+        // Then: they are erased without errors
+        expect(output).toEqual(tsBlankSpace(input, () => {}));
+        expect(reported).toEqual([]);
+        expect(output).not.toContain("as");
+        expect(output).not.toContain("satisfies");
+    });
+
+    test("reports span information usable for diagnostics", () => {
+        // Given: an enum at a known offset
+        const input = "\n  enum E { A }\n";
+        // When: transpiled
+        const { reported } = collect(input);
+        // Then: the reported span covers the declaration
+        expect(reported).toEqual(["TSEnumDeclaration@3-15"]);
+        expect(input.slice(3, 15)).toBe("enum E { A }");
+    });
+});
