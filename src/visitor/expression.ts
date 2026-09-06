@@ -6,11 +6,7 @@ import type {
 } from 'oxc-parser'
 import type { Blanker } from '../core/blanker'
 import type { VisitResult } from '../types'
-import {
-  getBinaryOperatorPrecedence,
-  hasUnsafeNullishLogicalMix,
-  nextOperatorAfter,
-} from '../core/precedence'
+import { hasUnsafeNullishLogicalMix } from '../core/precedence'
 import { VISIT_JS } from '../types'
 
 type Assertion = Extract<
@@ -66,11 +62,6 @@ export function visitTypeAssertion(
   blanker: Blanker,
   node: Assertion,
 ): VisitResult {
-  if (assertionChainWouldChangeBinaryGrouping(blanker, node)) {
-    blanker.report(node)
-    return VISIT_JS
-  }
-
   const result = blanker.visitNested(node.expression)
   const nodeEnd = node.end
   if (
@@ -84,49 +75,6 @@ export function visitTypeAssertion(
     blanker.blankRange(node.expression.end, nodeEnd)
   }
   return result
-}
-
-/**
- * Detect if erasing a type assertion would result in a runtime syntax error due
- * to changed operator grouping. e.g. In `1 + 1 as T / 2` erasing `as T` would
- * rebind the `/` onto `(1 + 1)` which TypeScript would not allow silently.
- */
-function assertionChainWouldChangeBinaryGrouping(
-  blanker: Blanker,
-  node: Assertion,
-): boolean {
-  let baseExpr: Node = node.expression
-  while (
-    baseExpr.type === 'TSAsExpression'
-    || baseExpr.type === 'TSSatisfiesExpression'
-  ) {
-    baseExpr = baseExpr.expression
-  }
-
-  if (baseExpr.type !== 'BinaryExpression') {
-    return false
-  }
-
-  const nextToken = nextOperatorAfter(blanker.src, blanker.trivia, node.end)
-  const basePrecedence = getBinaryOperatorPrecedence(baseExpr.operator)
-  const nextPrecedence
-    = nextToken === undefined
-      ? undefined
-      : getBinaryOperatorPrecedence(nextToken)
-  if (basePrecedence === undefined || nextPrecedence === undefined) {
-    return false
-  }
-
-  if (nextPrecedence > basePrecedence) {
-    return true // higher next precedence is unsafe, the grouping would change
-  }
-
-  if (nextPrecedence === basePrecedence) {
-    // Exponentiation is unsafe as it is right-associative. `(2 ** 2) ** 3` !== `2 ** 2 ** 3`.
-    return baseExpr.operator === '**' || nextToken === '**'
-  }
-
-  return false
 }
 
 /**
