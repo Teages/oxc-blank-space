@@ -94,7 +94,7 @@ impl BlankString {
             }
         }
 
-        out.extend_from_slice(&input[previous_end as usize..].as_bytes());
+        out.extend_from_slice(&input.as_bytes()[previous_end as usize..]);
         // ranges only ever contain the input, spaces, and caller-provided text
         // (all UTF-8), so the buffer is valid UTF-8 by construction.
         // SAFETY-free variant: String::from_utf8 checked in debug builds.

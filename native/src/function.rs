@@ -1,10 +1,10 @@
 //! Port of `src/visitor/function.ts`.
 
 use oxc_ast::ast::*;
+use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
 use crate::pattern;
-use crate::trivia::is_word_char;
 use crate::walk::{VisitResult, Walker, statement_index};
 
 pub(crate) fn visit_function_like<'a>(w: &mut Walker<'a>, node: &'a Function<'a>) -> VisitResult {
@@ -157,7 +157,7 @@ pub(crate) fn blank_type_parameters(
     open_paren: i64,
 ) {
     let span = type_parameters.span();
-    if open_paren >= 0 && w.blanker.trivia.spans_lines(span.start + 1, open_paren as u32 + 1) {
+    if open_paren >= 0 && w.blanker.tokens.spans_lines(span.start + 1, open_paren as u32 + 1) {
         w.blanker.output.blank_but_start_with_open_paren(span.start, span.end);
         w.blanker.blank_range(open_paren as u32, open_paren as u32 + 1);
     } else {
@@ -174,7 +174,7 @@ fn arrow_return_type_spans_lines(
 ) -> bool {
     let return_type_end = return_type.span().end;
     let params_end = last_param_end(params, open_paren, node_start);
-    w.blanker.trivia.spans_lines(params_end, return_type_end)
+    w.blanker.tokens.spans_lines(params_end, return_type_end)
 }
 
 /// End of the last parameter (rest included, matching the estree array), or
@@ -205,34 +205,34 @@ fn find_params_open_paren(
     node_start: u32,
 ) -> i64 {
     if let Some(tp) = type_parameters {
-        let paren = w.blanker.trivia.scan_char(tp.span().end);
-        return if w.blanker.trivia.byte_at(paren) == Some(b'(') {
-            paren as i64
-        } else {
-            -1
-        };
+        return expect_lparen(w, tp.span().end);
     }
     if let Some(id) = id {
-        let paren = w.blanker.trivia.scan_char(id.span().end);
-        return if w.blanker.trivia.byte_at(paren) == Some(b'(') {
-            paren as i64
-        } else {
-            -1
-        };
+        return expect_lparen(w, id.span().end);
     }
     // Anonymous function or arrow: skip `async`/`function`/`*` before the `(`.
-    let mut pos = w.blanker.trivia.skip_forward(node_start, false);
-    loop {
-        match w.blanker.trivia.byte_at(pos) {
-            Some(b'(') => return pos as i64,
-            Some(c) if is_word_char(c) => {
-                while w.blanker.trivia.byte_at(pos).is_some_and(is_word_char) {
-                    pos += 1;
-                }
+    let mut token = w.blanker.tokens.token_from(node_start);
+    while let Some(current) = token {
+        match current.kind() {
+            Kind::LParen => return current.span().start as i64,
+            Kind::Star => token = w.blanker.tokens.token_from(current.span().end),
+            kind
+                if kind.is_identifier()
+                    || kind.is_reserved_keyword()
+                    || kind.is_contextual_keyword() =>
+            {
+                token = w.blanker.tokens.token_from(current.span().end);
             }
-            Some(b'*') => pos += 1,
             _ => return -1,
         }
+    }
+    -1
+}
+
+fn expect_lparen(w: &Walker<'_>, pos: u32) -> i64 {
+    match w.blanker.tokens.token_from(pos) {
+        Some(token) if token.kind() == Kind::LParen => token.span().start as i64,
+        _ => -1,
     }
 }
 
@@ -246,12 +246,16 @@ fn find_closing_paren(
     // TypeScript's empty NodeArray position does.
     let mut pos = last_param_end(params, open_paren, node_start);
     // Skip the parameter-list trailing comma; only `,` or `)` can follow.
-    loop {
-        pos = w.blanker.trivia.scan_char(pos);
-        match w.blanker.trivia.byte_at(pos) {
-            Some(b')') => return pos as i64,
-            Some(b',') => pos += 1,
+    let mut token = w.blanker.tokens.token_from(pos);
+    while let Some(current) = token {
+        match current.kind() {
+            Kind::RParen => return current.span().start as i64,
+            Kind::Comma => {
+                pos = current.span().end;
+                token = w.blanker.tokens.token_from(pos);
+            }
             _ => return -1,
         }
     }
+    -1
 }

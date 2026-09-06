@@ -2,9 +2,11 @@
 //! operations. The walk logic lives in `walk.rs` and friends; they coordinate
 //! through an instance of this struct.
 
-use crate::blank_string::BlankString;
-use crate::trivia::Trivia;
+use oxc_parser::{Kind, Token};
 use oxc_span::Span;
+
+use crate::blank_string::BlankString;
+use crate::trivia::TokenIndex;
 
 /// Information about a TypeScript-only construct that has runtime semantics
 /// and therefore cannot be erased. Positions are byte offsets into the input.
@@ -17,7 +19,7 @@ pub struct UnsupportedSyntax {
 
 pub struct Blanker<'a> {
     pub output: BlankString,
-    pub trivia: Trivia<'a>,
+    pub tokens: TokenIndex<'a>,
     /// True while the previously emitted JS did not end with a `;`.
     pub semicolon_needed: bool,
     /// Unsupported constructs reported so far.
@@ -25,10 +27,10 @@ pub struct Blanker<'a> {
 }
 
 impl<'a> Blanker<'a> {
-    pub fn new(src: &'a str, comment_spans: impl IntoIterator<Item = (u32, u32)>) -> Self {
+    pub fn new(src: &'a str, tokens: &'a [Token]) -> Self {
         Self {
             output: BlankString::default(),
-            trivia: Trivia::new(src, comment_spans),
+            tokens: TokenIndex::new(src, tokens),
             semicolon_needed: false,
             reports: Vec::new(),
         }
@@ -75,11 +77,9 @@ impl<'a> Blanker<'a> {
 
     /// Blank a node and, when directly followed by a comma, the comma too.
     pub fn blank_exact_and_optional_trailing_comma(&mut self, span: Span) {
-        let comma = self.trivia.scan_char(span.end);
-        let end = if self.trivia.byte_at(comma) == Some(b',') {
-            comma + 1
-        } else {
-            span.end
+        let end = match self.tokens.token_from(span.end) {
+            Some(token) if token.kind() == Kind::Comma => token.span().end,
+            _ => span.end,
         };
         self.output.blank(span.start, end);
     }
@@ -87,14 +87,13 @@ impl<'a> Blanker<'a> {
     /// Whether the node text ends with `;` or a same-line `;` directly follows
     /// it.
     pub fn ends_with_semicolon(&self, span: Span) -> bool {
-        self.trivia.ends_with_semicolon(span.start, span.end)
+        self.tokens.ends_with_semicolon(span.start, span.end)
     }
 
-    /// Erase the `?` / `!` marker sitting directly before `anchor`.
-    pub fn blank_marker_char(&mut self, anchor: u32, marker: u8) {
-        let position = self.trivia.skip_backward(anchor);
-        if position >= 0 && self.trivia.byte_at(position as u32) == Some(marker) {
-            self.output.blank(position as u32, position as u32 + 1);
+    /// Erase the marker token (`?` or `!`) sitting directly before `anchor`.
+    pub fn blank_marker_char(&mut self, anchor: u32, marker: Kind) {
+        if let Some(span) = self.tokens.marker_before(anchor, marker) {
+            self.output.blank(span.start, span.end);
         }
     }
 }

@@ -8,6 +8,7 @@
 //! where the JS implementation emits it.
 
 use oxc_ast::ast::*;
+use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
 use crate::walk::{VisitResult, Walker};
@@ -30,7 +31,7 @@ pub(crate) fn visit_variable_declarator<'a>(
         let anchor = type_annotation
             .map(|t| t.span().start)
             .unwrap_or_else(|| node.id.span().end);
-        w.blanker.blank_marker_char(anchor, b'!');
+        w.blanker.blank_marker_char(anchor, Kind::Bang);
     }
     visit_held(
         w,
@@ -128,7 +129,7 @@ fn blank_own_annotation<'a, 'b>(w: &mut Walker<'a>, held: HeldPattern<'a, 'b>, n
             .type_annotation
             .map(|t| t.span().start)
             .unwrap_or(node_end);
-        w.blanker.blank_marker_char(anchor, b'?');
+        w.blanker.blank_marker_char(anchor, Kind::Question);
     }
     if let Some(ta) = held.type_annotation {
         w.blanker.blank_type_annotation(ta.span());

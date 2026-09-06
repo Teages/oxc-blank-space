@@ -10,6 +10,7 @@ use std::mem::take;
 
 use oxc_ast::ast::*;
 use oxc_ast::AstKind;
+use oxc_parser::Token;
 use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, Span};
 use oxc_syntax::node::NodeId;
@@ -97,17 +98,17 @@ impl Iterator for Children<'_, '_> {
 
 /// Blank a whole program: returns the blanked output and the unsupported
 /// constructs reported along the way.
-pub fn blank_program(program: &Program<'_>, src: &str) -> (String, Vec<UnsupportedSyntax>) {
+pub fn blank_program<'a>(
+    program: &Program<'a>,
+    src: &'a str,
+    tokens: &'a [Token],
+) -> (String, Vec<UnsupportedSyntax>) {
     let mut flattener = Flattener::default();
     flattener.visit_program(program);
 
-    let comment_spans = program
-        .comments
-        .iter()
-        .map(|c| (c.span.end, c.span.start));
     let mut walker = Walker {
         src,
-        blanker: Blanker::new(src, comment_spans),
+        blanker: Blanker::new(src, tokens),
         nodes: flattener.nodes,
         first_child: flattener.first_child,
         next_sibling: flattener.next_sibling,

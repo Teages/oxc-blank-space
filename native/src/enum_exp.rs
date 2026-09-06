@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::*;
 use oxc_ast::AstKind;
+use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
 use crate::walk::Walker;
@@ -30,18 +31,20 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
 
     // `enum` keyword — for `const enum` the node span starts at `const`, which
     // is erased together with the keyword.
-    let first = w.blanker.trivia.scan_word(node.span().start);
+    let first = w.blanker.tokens.token_from(node.span().start);
     let keyword = match first {
-        Some((start, "const")) => w.blanker.trivia.scan_word(start + "const".len() as u32),
+        Some(token) if token.kind() == Kind::Const => {
+            w.blanker.tokens.token_from(token.span().end)
+        }
         other => other,
     };
-    let Some((keyword_start, "enum")) = keyword else {
+    let Some(keyword_token) = keyword.filter(|token| token.kind() == Kind::Enum) else {
         w.blanker.report("TSEnumDeclaration", node.span());
         return;
     };
     w.blanker
         .output
-        .override_range(node.span().start, keyword_start + 4, "var ");
+        .override_range(node.span().start, keyword_token.span().end, "var ");
     w.blanker.output.override_range(
         node.id.span().start,
         node.id.span().end,
@@ -117,9 +120,12 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
         }
 
         member_names.insert(member_name);
-        let comma = w.blanker.trivia.scan_char(member_span.end);
-        if w.blanker.trivia.byte_at(comma) == Some(b',') {
-            w.blanker.output.override_range(comma, comma + 1, ";");
+        if let Some(comma) = w.blanker.tokens.token_from(member_span.end)
+            && comma.kind() == Kind::Comma
+        {
+            w.blanker
+                .output
+                .override_range(comma.span().start, comma.span().end, ";");
         }
     }
 
@@ -322,7 +328,7 @@ fn qualify_index(
             qualify_expr(w, &property.value, enum_name, member_names);
         }
         _ => {
-            for child in w.children_of(idx).to_vec() {
+            for child in w.children_of(idx).collect::<Vec<_>>() {
                 qualify_index(w, child, enum_name, member_names);
             }
         }

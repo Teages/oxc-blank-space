@@ -2,20 +2,11 @@
 
 use oxc_ast::ast::*;
 use oxc_ast::AstKind;
+use oxc_parser::Kind;
 use oxc_span::{GetSpan, Span};
 
 use crate::function;
 use crate::walk::{VisitResult, Walker};
-
-const REMOVED_MEMBER_KEYWORDS: [&str; 7] = [
-    "public",
-    "protected",
-    "private",
-    "readonly",
-    "override",
-    "abstract",
-    "declare",
-];
 
 pub(crate) fn visit_class_like<'a>(w: &mut Walker<'a>, node: &'a Class<'a>) -> VisitResult {
     // The declare check comes first: an erased class takes its decorators with
@@ -139,10 +130,10 @@ fn visit_property<'a>(w: &mut Walker<'a>, member: PropertyParts<'a>) -> VisitRes
         .or_else(|| member.value.map(|v| v.span().start))
         .unwrap_or(member.span.end);
     if member.definite {
-        blank_marker_after_key(w, anchor, b'!');
+        blank_marker_after_key(w, anchor, Kind::Bang);
     }
     if member.optional {
-        blank_marker_after_key(w, anchor, b'?');
+        blank_marker_after_key(w, anchor, Kind::Question);
     }
 
     if let Some(ta) = member.type_annotation {
@@ -215,17 +206,18 @@ fn visit_method_definition<'a>(w: &mut Walker<'a>, member: &'a MethodDefinition<
         w.visit_nested(key_index);
     }
     if member.optional {
-        blank_marker_after_key(w, member.value.span().start, b'?');
+        blank_marker_after_key(w, member.value.span().start, Kind::Question);
     }
     // JS calls `blanker.visitNode(member.value)` — no semicolon update here.
     w.visit_node(node_index!(member.value))
 }
 
 fn blank_abstract_keyword(w: &mut Walker<'_>, node: &Class<'_>) {
-    if let Some((start, word)) = w.blanker.trivia.scan_word(node.span().start)
-        && word == "abstract"
+    if let Some(token) = w.blanker.tokens.token_from(node.span().start)
+        && token.kind() == Kind::Abstract
     {
-        w.blanker.blank_range(start, start + word.len() as u32);
+        let span = token.span();
+        w.blanker.blank_range(span.start, span.end);
     }
 }
 
@@ -243,17 +235,17 @@ fn blank_implements_clause(
         .or_else(|| node.type_parameters.as_ref().map(|t| t.span().end))
         .or_else(|| node.id.as_ref().map(|i| i.span().end))
         .unwrap_or_else(|| node.span().start + 5);
-    let Some((start, word)) = w.blanker.trivia.scan_word(anchor) else {
+    let Some(token) = w.blanker.tokens.token_from(anchor) else {
         return;
     };
-    if word != "implements" {
+    if token.kind() != Kind::Implements {
         return;
     }
     let last = clause.last().expect("implements clause is non-empty").span();
-    w.blanker.blank_range(start, last.end);
+    w.blanker.blank_range(token.span().start, last.end);
 }
 
-fn blank_marker_after_key(w: &mut Walker<'_>, anchor: u32, marker: u8) {
+fn blank_marker_after_key(w: &mut Walker<'_>, anchor: u32, marker: Kind) {
     w.blanker.blank_marker_char(anchor, marker);
 }
 
@@ -265,58 +257,61 @@ fn blank_marker_after_key(w: &mut Walker<'_>, anchor: u32, marker: u8) {
 /// their spans. When `add_semi` is set (computed keys, an ASI hazard), a leading
 /// erased keyword is replaced by a `;` — but only when nothing (decorator or
 /// kept keyword) precedes it, mirroring ts-blank-space's modifiers[0] check.
-fn blank_removed_member_keywords(
-    w: &mut Walker<'_>,
+fn blank_removed_member_keywords<'a>(
+    w: &mut Walker<'a>,
     member_start: u32,
     key_start: u32,
-    decorators: &[Decorator<'_>],
+    decorators: &'a [Decorator<'a>],
     add_semi: bool,
 ) {
+    /// Modifier keywords erased by ts-blank-space, as token kinds.
+    const REMOVED: [Kind; 7] = [
+        Kind::Public,
+        Kind::Protected,
+        Kind::Private,
+        Kind::Readonly,
+        Kind::Override,
+        Kind::Abstract,
+        Kind::Declare,
+    ];
+
     let mut removed_count = 0;
     let mut saw_preceding_item = false;
-    let mut pos = member_start;
+    let mut token = w.blanker.tokens.token_from(member_start);
 
-    while pos < key_start {
-        pos = w.blanker.trivia.skip_forward(pos, false);
-        if pos >= key_start {
+    while let Some(current) = token {
+        if current.span().start >= key_start {
             break;
         }
 
         if let Some(decorator) = decorators
             .iter()
-            .find(|d| d.span().start <= pos && pos < d.span().end)
+            .find(|d| d.span().start <= current.span().start && current.span().start < d.span().end)
         {
             w.visit_nested(node_index!(decorator));
-            pos = decorator.span().end;
             saw_preceding_item = true;
+            token = w.blanker.tokens.token_from(decorator.span().end);
             continue;
         }
 
-        let Some(c) = w.src_byte(pos) else {
-            break;
-        };
-        if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
-            let mut end = pos;
-            while end < key_start
-                && w.src_byte(end).is_some_and(crate::trivia::is_word_char)
-            {
-                end += 1;
+        let kind = current.kind();
+        if REMOVED.contains(&kind) {
+            let span = current.span();
+            if add_semi && removed_count == 0 && !saw_preceding_item {
+                w.blanker.output.blank_but_start_with_semi(span.start, span.end);
+            } else {
+                w.blanker.blank_range(span.start, span.end);
             }
-            let word = &w.src[pos as usize..end as usize];
-            if REMOVED_MEMBER_KEYWORDS.contains(&word) {
-                if add_semi && removed_count == 0 && !saw_preceding_item {
-                    w.blanker.output.blank_but_start_with_semi(pos, end);
-                } else {
-                    w.blanker.blank_range(pos, end);
-                }
-                removed_count += 1;
-            }
+            removed_count += 1;
             saw_preceding_item = true;
-            pos = end;
-            continue;
+        } else if kind == Kind::Star {
+            // `*` (generator) and anything unexpected stays as-is and does not
+            // count as a preceding item.
+        } else {
+            // kept keywords (`static`, `async`, `get`, `set`, `accessor`, ...)
+            // and any other word
+            saw_preceding_item = true;
         }
-
-        // `*` (generator) and anything unexpected stays as-is.
-        pos += 1;
+        token = w.blanker.tokens.token_from(current.span().end);
     }
 }

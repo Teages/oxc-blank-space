@@ -1,6 +1,7 @@
 //! Port of `src/index.ts` — parse + blank pipeline.
 
 use oxc_allocator::Allocator;
+use oxc_parser::config::TokensParserConfig;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
@@ -26,7 +27,9 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
     let source_type = SourceType::from_path(filename)
         .unwrap_or_else(|_| SourceType::ts())
         .with_module(true);
-    let return_value = Parser::new(&allocator, input, source_type).parse();
+    let return_value = Parser::new(&allocator, input, source_type)
+        .with_config(TokensParserConfig)
+        .parse();
 
     // Hard parse failures leave no usable AST: the input is not valid
     // TypeScript, so surface it as a syntax error rather than silently
@@ -46,7 +49,7 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
         return Err(format!("failed to parse {filename}:\n{details}"));
     }
 
-    let (code, unsupported) = blank_program(&return_value.program, input);
+    let (code, unsupported) = blank_program(&return_value.program, input, &return_value.tokens);
     Ok(TranspileOutput { code, unsupported })
 }
 
