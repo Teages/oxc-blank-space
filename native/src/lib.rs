@@ -142,9 +142,11 @@ mod perf_bench {
     use std::fs;
     use std::time::Instant;
 
-    use oxc_allocator::Allocator;
+    use oxc_allocator::{Allocator, AllocatorPool};
     use oxc_parser::Parser;
     use oxc_span::SourceType;
+
+    use crate::transpile::allocator_pool;
 
     fn corpus() -> String {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test/fixture");
@@ -159,10 +161,11 @@ mod perf_bench {
         out
     }
 
-    fn parse_only(input: &str, tokens: bool) {
-        let allocator = Allocator::default();
+    fn parse_only(pool: &AllocatorPool, input: &str, tokens: bool) {
+        let guard = pool.get();
+        let allocator: &Allocator = &guard;
         let source_type = SourceType::from_path("input.ts").unwrap().with_module(true);
-        let parser = Parser::new(&allocator, input, source_type);
+        let parser = Parser::new(allocator, input, source_type);
         let ret = if tokens {
             parser.with_config(oxc_parser::config::TokensParserConfig).parse()
         } else {
@@ -200,8 +203,9 @@ mod perf_bench {
         transpile_for_bench(&corpus);
 
         let iters = 100;
-        let (p_min, p_mean) = time_it(iters, || parse_only(&corpus, false));
-        let (pt_min, pt_mean) = time_it(iters, || parse_only(&corpus, true));
+        let pool = allocator_pool();
+        let (p_min, p_mean) = time_it(iters, || parse_only(pool, &corpus, false));
+        let (pt_min, pt_mean) = time_it(iters, || parse_only(pool, &corpus, true));
         let (t_min, t_mean) = time_it(iters, || { transpile_for_bench(&corpus); });
         println!(
             "parse-only      min={:>5}us mean={:>5}us",

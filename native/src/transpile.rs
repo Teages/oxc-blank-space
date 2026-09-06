@@ -1,9 +1,23 @@
 //! Port of `src/index.ts` — parse + blank pipeline.
 
-use oxc_allocator::Allocator;
+use std::sync::OnceLock;
+
+use oxc_allocator::{Allocator, AllocatorPool};
 use oxc_parser::config::TokensParserConfig;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
+
+/// Arena pool shared by sync and async calls (the async entry runs on the
+/// libuv thread pool, so concurrent transpiles must not share one arena).
+/// Reusing arenas keeps the parser from re-faulting fresh memory on every
+/// call.
+pub(crate) fn allocator_pool() -> &'static AllocatorPool {
+    static POOL: OnceLock<AllocatorPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        AllocatorPool::new(threads)
+    })
+}
 
 use crate::blanker::UnsupportedSyntax;
 use crate::walk::blank_program;
@@ -23,11 +37,12 @@ pub struct TranspileOutput {
 /// including `as`/`satisfies` erasures that would change operator grouping,
 /// which TypeScript itself rejects — return an error.
 pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String> {
-    let allocator = Allocator::default();
+    let allocator_guard = allocator_pool().get();
+    let allocator: &Allocator = &allocator_guard;
     let source_type = SourceType::from_path(filename)
         .unwrap_or_else(|_| SourceType::ts())
         .with_module(true);
-    let return_value = Parser::new(&allocator, input, source_type)
+    let return_value = Parser::new(allocator, input, source_type)
         .with_config(TokensParserConfig)
         .parse();
 
