@@ -25,3 +25,6 @@ napi-build = "2"
 
 [profile.release]
 lto = "thin"
+# drop the symbol table + debug info; the dynamic exports napi loads through
+# stay. distribution size matters: every shipped target is ~1.5 MB otherwise
+strip = "symbols"
