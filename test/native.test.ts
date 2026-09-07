@@ -1,8 +1,9 @@
 import type { UnsupportedSyntax } from '../src/native'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { transpile } from '../src/index'
 import {
   nativeBindingAvailable,
@@ -11,6 +12,20 @@ import {
 } from '../src/native'
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), 'fixture')
+
+if (process.env.NATIVE_REQUIRED === '1' && !nativeBindingAvailable) {
+  throw new Error(
+    'NATIVE_REQUIRED=1 but the native binary is missing; run pnpm build:native',
+  )
+}
+
+const asyncParityChecks: Array<() => Promise<void>> = []
+
+afterAll(async () => {
+  for (const check of asyncParityChecks) {
+    await check()
+  }
+})
 
 describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
   for (const filename of readdirSync(fixtureDir).filter(f =>
@@ -136,18 +151,67 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     ).toThrow(sentinel)
   })
 
-  it('documents lossy handling of raw lone surrogates', () => {
-    // Raw lone surrogates cannot survive the UTF-8 boundary: napi replaces
-    // them with U+FFFD, while the JS implementation passes them through.
-    // Rust cannot represent them losslessly, so this divergence is kept
-    // (and pinned here) rather than fixed.
+  it('serves raw lone surrogates through the JS implementation', async () => {
+    // Raw lone surrogates cannot survive the UTF-8 boundary into Rust, so
+    // inputs containing one fall back to the JS implementation and keep the
+    // character losslessly.
     const input = `// ${String.fromCharCode(0xD800)}\nlet a = 1;`
     const jsOutput = transpile(input)
     expect(jsOutput).toContain(String.fromCharCode(0xD800))
-    const syncOutput = transpileSync(input)
-    expect(syncOutput.length).toBe(jsOutput.length)
-    expect(syncOutput).toContain('\uFFFD')
-    expect(syncOutput).not.toBe(jsOutput)
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('formats seeded random doubles identically to JS on both entries', () => {
+    // deterministic xorshift-style PRNG over raw f64 bit patterns, plus the
+    // structured edge values (known ties, extremes, subnormals)
+    const mulberry32 = (seed: number): (() => number) => {
+      let state = seed
+      return () => {
+        state |= 0
+        state = (state + 0x6D2B79F5) | 0
+        let t = Math.imul(state ^ (state >>> 15), 1 | state)
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+      }
+    }
+    const random = mulberry32(0xC0FFEE)
+    const randomBits = (): bigint =>
+      (BigInt(Math.floor(random() * 2 ** 32)) << 32n)
+      | BigInt(Math.floor(random() * 2 ** 32) >>> 0)
+
+    const values = [
+      Number('1381472817847324.2'),
+      0.1,
+      5e-324,
+      1e-323,
+      1 - Number.EPSILON / 2,
+      Number.MAX_VALUE,
+      Number.MIN_VALUE,
+      1e21,
+      1e-7,
+      Number('1000000000000000128'),
+    ]
+    const view = new DataView(new ArrayBuffer(8))
+    while (values.length < 3000) {
+      view.setBigUint64(0, randomBits())
+      const value = view.getFloat64(0)
+      if (Number.isFinite(value)) {
+        values.push(value)
+      }
+    }
+
+    for (const value of values) {
+      const input = `enum E { A = ${String(value)} }`
+      const jsOutput = transpile(input)
+      const expectedFragment = `E["A"] = ${String(value)}]`
+      expect(transpileSync(input)).toBe(jsOutput)
+      expect(transpileSync(input)).toContain(expectedFragment)
+      asyncParityChecks.push(async () => {
+        expect(await transpileAsync(input)).toBe(jsOutput)
+        expect(await transpileAsync(input)).toContain(expectedFragment)
+      })
+    }
   })
 
   it('rejects grouping-unsafe as-erasures with a SyntaxError', async () => {

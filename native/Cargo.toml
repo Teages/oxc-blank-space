@@ -17,6 +17,7 @@ oxc_ast = "0.148.0"
 oxc_ast_visit = "0.148.0"
 oxc_span = "0.148.0"
 oxc_syntax = "0.148.0"
+dtoa = "1"
 
 [build-dependencies]
 napi-build = "2"

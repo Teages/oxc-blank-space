@@ -1,4 +1,5 @@
 import type { TranspileOptions, UnsupportedSyntax } from '../src/index'
+import process from 'node:process'
 import { afterAll, expect } from 'vitest'
 import { transpile as transpileJs } from '../src/index'
 import { nativeBindingAvailable, transpileAsync, transpileSync } from '../src/native'
@@ -14,6 +15,14 @@ import { nativeBindingAvailable, transpileAsync, transpileSync } from '../src/na
  * the whole file.
  */
 const asyncChecks: Array<() => Promise<void>> = []
+
+// CI sets NATIVE_REQUIRED so a missing binary fails the run instead of
+// silently skipping every native comparison below.
+if (process.env.NATIVE_REQUIRED === '1' && !nativeBindingAvailable) {
+  throw new Error(
+    'NATIVE_REQUIRED=1 but the native binary is missing; run pnpm build:native',
+  )
+}
 
 afterAll(async () => {
   for (const [index, check] of asyncChecks.entries()) {

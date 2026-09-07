@@ -22,5 +22,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm test:types
       - run: pnpm build
+      # the suites run the native entries alongside the JS implementation;
+      # a missing binary must fail CI, not silently skip coverage
       - run: pnpm vitest --coverage
+        env:
+          NATIVE_REQUIRED: '1'
       - uses: codecov/codecov-action@v3

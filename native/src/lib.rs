@@ -248,3 +248,4 @@ mod perf_bench {
         std::hint::black_box(output.code.len() + output.unsupported.len())
     }
 }
+mod dtoa_probe;

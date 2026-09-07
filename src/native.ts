@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { transpile as transpileJs } from '../src/index'
 
 export type { OnError, TranspileOptions, UnsupportedSyntax } from './types'
 
@@ -30,13 +31,39 @@ interface NativeBinding {
 const nativeDir = resolve(dirname(fileURLToPath(import.meta.url)), '../dist')
 
 /**
+ * Raw lone surrogates cannot survive the UTF-8 boundary into Rust (they turn
+ * into U+FFFD), so inputs containing one are served by the JS implementation,
+ * which handles them losslessly. Paired surrogates (astral characters) are
+ * unaffected.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+/**
  * The napi artifact for the running platform, e.g.
- * `oxc-blank-space-native.darwin-arm64.node`.
+ * `oxc-blank-space-native.darwin-arm64.node` or, on Linux, the glibc/musl
+ * variant matched against the runtime. Returns undefined when no matching
+ * binary exists — loading a binary for a different platform or libc would
+ * fail anyway, just with a confusing dynamic-linking error.
  */
 function platformBinary(): string | undefined {
-  const preferred = `oxc-blank-space-native.${process.platform}-${process.arch}.node`
+  const base = `oxc-blank-space-native.${process.platform}-${process.arch}`
   const binaries = readdirSync(nativeDir).filter(file => file.endsWith('.node')).sort()
-  return binaries.includes(preferred) ? preferred : binaries[0]
+  if (process.platform !== 'linux') {
+    return binaries.includes(`${base}.node`) ? `${base}.node` : undefined
+  }
+  // process.report carries the glibc version only when linked against glibc
+  const header = (
+    process.report as { getReport?: () => { header?: { glibcVersionRuntime?: string } } }
+  )?.getReport?.().header
+  const musl = header?.glibcVersionRuntime === undefined
+  const preferred = musl ? `${base}-musl.node` : `${base}-gnu.node`
+  const other = musl ? `${base}-gnu.node` : `${base}-musl.node`
+  const found = binaries.includes(preferred)
+    ? preferred
+    : binaries.includes(other)
+      ? other
+      : undefined
+  return found
 }
 
 /**
@@ -110,6 +137,9 @@ export async function transpileAsync(
   input: string,
   options: TranspileOptions = {},
 ): Promise<string> {
+  if (LONE_SURROGATE.test(input)) {
+    return transpileJs(input, options)
+  }
   const result = await requireBinding()
     .transpileAsync(input, toNativeOptions(options))
     .catch((error: unknown) => {
@@ -129,6 +159,9 @@ export function transpileSync(
   input: string,
   options: TranspileOptions = {},
 ): string {
+  if (LONE_SURROGATE.test(input)) {
+    return transpileJs(input, options)
+  }
   // Only the binding call is wrapped into a SyntaxError (parse failures);
   // exceptions thrown from `options.onError` must propagate unchanged,
   // matching the JS implementation and `transpileAsync`.
