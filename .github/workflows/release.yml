@@ -84,17 +84,19 @@ jobs:
     permissions: {}
     outputs:
       files: ${{ steps.pack.outputs.files }}
-    env:
-      # downloaded outside the workspace so the pack checkout cannot wipe it
-      NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: binding-*
           path: ${{ runner.temp }}/native-bindings
           merge-multiple: true
+      # NAPI_PREBUILT_DIR is downloaded outside the workspace so the pack
+      # checkout cannot wipe it; `runner` is not available in job-level env,
+      # so set it on the step that runs prepack
       - id: pack
         uses: danielroe/uppt/pack@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+        env:
+          NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
 
   # stage the prebuilt tarball(s) to npm via OIDC
   publish:

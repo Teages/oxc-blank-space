@@ -1,5 +1,7 @@
 # @teages/oxc-blank-space
 
+[![pkg.pr.new](https://pkg.pr.new/badge/Teages/oxc-blank-space)](https://pkg.pr.new/~/Teages/oxc-blank-space)
+
 A small, fast type-stripper that blanks TypeScript-only syntax using the [oxc parser](https://oxc.rs), leaving valid JavaScript with identical line and column positions. A drop-in reimplementation of [ts-blank-space](https://github.com/bloomberg/ts-blank-space) on the oxc parser instead of the TypeScript compiler.
 
 ```ts
