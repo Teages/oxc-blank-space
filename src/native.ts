@@ -44,7 +44,8 @@ const nativeDir = resolve(dirname(fileURLToPath(import.meta.url)), '../dist')
  */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
-function toUnits(input: string): Uint16Array {
+/** UTF-16 code units of a JS string (lossless, unlike `String` → UTF-8). */
+export function toUtf16Units(input: string): Uint16Array {
   const units = new Uint16Array(input.length)
   for (let i = 0; i < input.length; i++) {
     units[i] = input.charCodeAt(i)
@@ -52,7 +53,8 @@ function toUnits(input: string): Uint16Array {
   return units
 }
 
-function unitsToString(units: Uint16Array): string {
+/** JS string from UTF-16 code units (lossless, unlike UTF-8 decoding). */
+export function fromUtf16Units(units: Uint16Array): string {
   let out = ''
   for (let i = 0; i < units.length; i += 0x8000) {
     out += String.fromCharCode(...units.subarray(i, i + 0x8000))
@@ -115,6 +117,11 @@ const binding: NativeBinding | undefined = nativeBindingAvailable
     })()
   : undefined
 
+/** Direct access to the loaded binding (used by tests). */
+export function nativeRequire(): NativeBinding {
+  return requireBinding()
+}
+
 function requireBinding(): NativeBinding {
   if (!binding) {
     throw new Error(
@@ -164,12 +171,12 @@ export async function transpileAsync(
 ): Promise<string> {
   if (LONE_SURROGATE.test(input)) {
     const result = await requireBinding()
-      .transpileUtf16Async(toUnits(input), toNativeOptions(options))
+      .transpileUtf16Async(toUtf16Units(input), toNativeOptions(options))
       .catch((error: unknown) => {
         throw new SyntaxError(error instanceof Error ? error.message : String(error))
       })
     dispatchReports(result.unsupported, options)
-    return unitsToString(result.code)
+    return fromUtf16Units(result.code)
   }
   const result = await requireBinding()
     .transpileAsync(input, toNativeOptions(options))
@@ -187,8 +194,8 @@ export async function transpileAsync(
  * that need to verify the native path itself.
  */
 export function transpileUtf16Direct(input: string): string {
-  const result = requireBinding().transpileUtf16Sync(toUnits(input))
-  return unitsToString(result.code)
+  const result = requireBinding().transpileUtf16Sync(toUtf16Units(input))
+  return fromUtf16Units(result.code)
 }
 
 /**
@@ -206,13 +213,13 @@ export function transpileSync(
     // onError exceptions propagate unchanged, matching transpileAsync.
     let unitsResult: { code: Uint16Array, unsupported: NativeUnsupported[] }
     try {
-      unitsResult = requireBinding().transpileUtf16Sync(toUnits(input), toNativeOptions(options))
+      unitsResult = requireBinding().transpileUtf16Sync(toUtf16Units(input), toNativeOptions(options))
     }
     catch (error) {
       throw new SyntaxError(error instanceof Error ? error.message : String(error))
     }
     dispatchReports(unitsResult.unsupported, options)
-    return unitsToString(unitsResult.code)
+    return fromUtf16Units(unitsResult.code)
   }
   // Only the binding call is wrapped into a SyntaxError (parse failures);
   // exceptions thrown from `options.onError` must propagate unchanged,

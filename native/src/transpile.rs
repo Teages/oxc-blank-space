@@ -97,9 +97,11 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         if is_high && next_low {
             let code = 0x10000 + (((unit - 0xD800) as u32) << 10) + (units[index + 1] - 0xDC00) as u32;
             copy.extend_from_slice(char::from_u32(code).expect("valid pair").encode_utf8(&mut buf).as_bytes());
-            // the low surrogate needs its own map entry (pointing at the end
-            // of the astral char) or every later unit index shifts by one
-            byte_to_unit.push(copy.len() as u32);
+            // the low surrogate needs its own map entry or every later unit
+            // index shifts by one; the entry points at the middle of the
+            // astral char's bytes — a position no span boundary can land on,
+            // so partition_point at real boundaries stays exact
+            byte_to_unit.push((copy.len() - 2) as u32);
             index += 2;
         } else if unit == 0x0A || unit == 0x0D {
             copy.push(unit as u8);

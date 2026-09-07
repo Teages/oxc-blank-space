@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { transpile } from '../src/index'
 import {
+  fromUtf16Units,
   nativeBindingAvailable,
+  nativeRequire,
+  toUtf16Units,
   transpileAsync,
   transpileSync,
   transpileUtf16Direct,
@@ -219,6 +222,35 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     const input = 'enum E { "\\u{D800}" = 1 }'
     const jsOutput = transpile(input)
     expect(jsOutput).toContain('\\ud800')
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('erases astral-char types correctly with a trailing raw lone surrogate', async () => {
+    // regression: the UTF-16 byte map consumed two units per surrogate pair
+    // but recorded one entry, shifting every later blank range by a unit and
+    // leaving a bare low surrogate in the output
+    const input
+      = `const x = "😀"; const y: string = "${
+        String.fromCharCode(0xD800)
+      }";`
+    const jsOutput = transpile(input)
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+    // direct binding call: the native path itself is lossless
+    const direct = fromUtf16Units(
+      nativeRequire().transpileUtf16Sync(toUtf16Units(input)).code,
+    )
+    expect(direct).toBe(jsOutput)
+  })
+
+  it('erases astral-char enum names correctly with a trailing raw lone surrogate', async () => {
+    const input
+      = `enum ${
+        String.fromCodePoint(0x10400)
+      } { A = 1 } // ${
+        String.fromCharCode(0xD800)}`
+    const jsOutput = transpile(input)
     expect(transpileSync(input)).toBe(jsOutput)
     expect(await transpileAsync(input)).toBe(jsOutput)
   })
