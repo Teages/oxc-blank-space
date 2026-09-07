@@ -104,9 +104,10 @@ await transpile(`const a: number = 1`)
 The wasm runtime (`@napi-rs/wasm-runtime`, emnapi) is bundled into the entry,
 so the package carries zero runtime dependencies; only the `.wasm` module is
 loaded as an asset. It needs `fetch` and WebAssembly (no SharedArrayBuffer,
-no cross-origin isolation). The async entry runs on emnapi's async workers;
-on the main thread of a browser page it behaves like the sync call between
-microtasks.
+no cross-origin isolation). The wasm module is fetched and instantiated when
+the entry is imported — if that fails, the import itself rejects. The async
+entry runs on emnapi's async workers; on the main thread of a browser page
+it behaves like the sync call between microtasks.
 
 ### Behavior parity
 
@@ -120,10 +121,13 @@ runtime property access on the transpiled output keeps resolving.
 The behavior suites (`test/*.test.ts`) run every test against the synchronous
 API and cross-check each call against the async API — output, `onError`
 reports and rejection messages byte for byte — against the `ts-blank-space`
-reference fixtures. A separate suite exercises the wasm binding; the `native
-build` workflow smoke-loads every shipped binary, including wasm, and a
-100k-value seeded double sweep pins the enum-expansion number formatting to
-`Number.prototype.toString` (round-half-to-even ties included).
+reference fixtures. Separate suites exercise the wasm binding and load the
+published browser entry (`dist/browser.mjs`) through a `fetch` shim; the
+`native build` workflow smoke-loads every shipped binary on matching
+hardware — including Windows ARM64 and wasm — and a 3,000-value seeded
+double sweep (plus structured edge cases) pins the enum-expansion number
+formatting to `Number.prototype.toString` (round-half-to-even ties
+included).
 
 ## Benchmark
 

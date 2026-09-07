@@ -12,10 +12,11 @@ export type OnError = (node: UnsupportedSyntax) => void
 
 export interface TranspileOptions {
   /**
-   * Called for every unsupported construct (enums, namespaces with runtime
-   * code, parameter properties, `export =`, `import x = require(...)`,
-   * `<T>expr` assertions, unsafe `as` erasures). The offending source is kept
-   * verbatim in the output, mirroring ts-blank-space.
+   * Called for every unsupported construct (namespaces with runtime code,
+   * parameter properties, `export =`, `import x = require(...)`, `<T>expr`
+   * assertions, unsafe `as` erasures). The offending source is kept verbatim
+   * in the output, mirroring ts-blank-space. Enums are expanded in place
+   * instead of being reported.
    */
   readonly onError?: OnError
   /**

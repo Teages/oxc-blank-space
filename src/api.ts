@@ -91,18 +91,24 @@ export function createApi(load: () => NativeBinding | undefined): {
   isAvailable: boolean
 } {
   let binding: NativeBinding | undefined
+  let loadError: unknown
   try {
     binding = load()
   }
-  catch {
-    // a present-but-broken artifact surfaces through requireBinding instead
+  catch (error) {
+    // a present-but-broken artifact surfaces through requireBinding, with the
+    // original failure (e.g. a dlopen error) attached as `cause`
     binding = undefined
+    loadError = error
   }
 
+  // throws a plain Error — not a SyntaxError, which is reserved for parse
+  // failures on both entry points
   function requireBinding(): NativeBinding {
     if (!binding) {
       throw new Error(
         '@teages/oxc-blank-space: no usable transpiler binding for this runtime. Run `pnpm build` first, or import `@teages/oxc-blank-space/browser` in browser environments.',
+        { cause: loadError },
       )
     }
     return binding
@@ -126,8 +132,9 @@ export function createApi(load: () => NativeBinding | undefined): {
     input: string,
     options: TranspileOptions = {},
   ): Promise<string> {
+    const native = requireBinding()
     if (LONE_SURROGATE.test(input)) {
-      const result = await requireBinding()
+      const result = await native
         .transpileUtf16Async(toUtf16Units(input), toNativeOptions(options))
         .catch((error: unknown) => {
           throw new SyntaxError(error instanceof Error ? error.message : String(error))
@@ -135,7 +142,7 @@ export function createApi(load: () => NativeBinding | undefined): {
       dispatchReports(result.unsupported, options)
       return fromUtf16Units(result.code)
     }
-    const result = await requireBinding()
+    const result = await native
       .transpileAsync(input, toNativeOptions(options))
       .catch((error: unknown) => {
         throw new SyntaxError(error instanceof Error ? error.message : String(error))
@@ -153,12 +160,13 @@ export function createApi(load: () => NativeBinding | undefined): {
     input: string,
     options: TranspileOptions = {},
   ): string {
+    // resolved outside the try blocks: a missing binding throws a plain
+    // Error, only parse failures are wrapped into a SyntaxError
+    const native = requireBinding()
     if (LONE_SURROGATE.test(input)) {
-      // Only the binding call is wrapped into a SyntaxError (parse failures);
-      // onError exceptions propagate unchanged, matching transpile.
       let unitsResult: NativeUnitsResult
       try {
-        unitsResult = requireBinding().transpileUtf16Sync(toUtf16Units(input), toNativeOptions(options))
+        unitsResult = native.transpileUtf16Sync(toUtf16Units(input), toNativeOptions(options))
       }
       catch (error) {
         throw new SyntaxError(error instanceof Error ? error.message : String(error))
@@ -166,12 +174,10 @@ export function createApi(load: () => NativeBinding | undefined): {
       dispatchReports(unitsResult.unsupported, options)
       return fromUtf16Units(unitsResult.code)
     }
-    // Only the binding call is wrapped into a SyntaxError (parse failures);
-    // exceptions thrown from `options.onError` must propagate unchanged,
-    // matching `transpile`.
+    // exceptions thrown from `options.onError` propagate unchanged
     let result: NativeResult
     try {
-      result = requireBinding().transpileNativeSync(input, toNativeOptions(options))
+      result = native.transpileNativeSync(input, toNativeOptions(options))
     }
     catch (error) {
       throw new SyntaxError(error instanceof Error ? error.message : String(error))

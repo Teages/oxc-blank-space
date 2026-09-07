@@ -18,12 +18,13 @@
     }
   },
   "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "typesVersions": {
     "*": {
       ".": [
         "./dist/index.d.mts"
       ],
-      "./browser": [
+      "browser": [
         "./dist/browser.d.mts"
       ]
     }

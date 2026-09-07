@@ -176,6 +176,25 @@ jobs:
             wasm/oxc-blank-space-native.wasip1-browser.js
           if-no-files-found: error
 
+  # the win32-arm64 binary is cross-compiled on an x64 runner; load it on
+  # real ARM64 Windows hardware
+  smoke-windows-arm64:
+    name: smoke win32 arm64
+    needs: build
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-aarch64-pc-windows-msvc
+          path: dist
+      - name: Smoke test (native arm64)
+        shell: bash
+        run: node scripts/smoke-native.mjs dist/oxc-blank-space-native.win32-arm64-msvc.node
+
   # both arm64 Linux binaries are cross-built on x64; verify them on real
   # arm64 hardware — the gnu one directly, the musl one inside an arm64
   # Alpine container (native container on the arm64 runner, no qemu)

@@ -343,7 +343,7 @@ describe('native transpiler', () => {
       expect(output).toContain(`E["A"] = ${String(value)}]`)
       // the full sweep runs on the sync path; spot-check the structured
       // edges on the async path to keep the suite fast
-      if (index < values.length - 10) {
+      if (index >= 10) {
         continue
       }
       await expect(transpile(input)).resolves.toContain(`E["A"] = ${String(value)}]`)

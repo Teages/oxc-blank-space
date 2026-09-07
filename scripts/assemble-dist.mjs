@@ -20,6 +20,18 @@ const dist = join(root, 'dist')
 const binaries = join(root, 'binaries')
 const prebuilt = process.env.NAPI_PREBUILT_DIR
 
+// every platform binary the loader can select (src/index.ts platformBinary)
+const expectedBinaries = [
+  'darwin-arm64',
+  'darwin-x64',
+  'linux-arm64-gnu',
+  'linux-arm64-musl',
+  'linux-x64-gnu',
+  'linux-x64-musl',
+  'win32-arm64-msvc',
+  'win32-x64-msvc',
+].map(name => `oxc-blank-space-native.${name}.node`)
+
 function placeWasmStaging(sourceDir) {
   mkdirSync(join(root, 'wasm'), { recursive: true })
   cpSync(
@@ -58,6 +70,11 @@ function placeWasmAssets(sourceDir) {
 mkdirSync(dist, { recursive: true })
 
 if (prebuilt) {
+  const present = new Set(readdirSync(prebuilt))
+  const missing = expectedBinaries.filter(name => !present.has(name))
+  if (missing.length > 0) {
+    throw new Error(`NAPI_PREBUILT_DIR is missing platform binaries: ${missing.join(', ')}`)
+  }
   placeWasmStaging(prebuilt)
 }
 else {
