@@ -46,8 +46,11 @@ pub struct TranspileUnitsOutput {
 pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String> {
     let allocator_guard = allocator_pool().get();
     let allocator: &Allocator = &allocator_guard;
+    // Unknown/no extension: the JS entry parses plain JavaScript here (the
+    // parser's own extension guess falls back to a module without JSX), so
+    // TypeScript syntax must fail exactly like it does there.
     let source_type = SourceType::from_path(filename)
-        .unwrap_or_else(|_| SourceType::ts())
+        .unwrap_or_else(|_| SourceType::mjs())
         .with_module(true);
     let return_value = Parser::new(allocator, input, source_type)
         .with_config(TokensParserConfig)
@@ -117,8 +120,9 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
 
     let allocator_guard = allocator_pool().get();
     let allocator: &Allocator = &allocator_guard;
+    // same extension fallback as [`transpile`] for JS-entry parity
     let source_type = SourceType::from_path(filename)
-        .unwrap_or_else(|_| SourceType::ts())
+        .unwrap_or_else(|_| SourceType::mjs())
         .with_module(true);
     let return_value = Parser::new(allocator, &parse_copy, source_type)
         .with_config(TokensParserConfig)

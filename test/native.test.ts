@@ -281,6 +281,42 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     expect(asyncOutput).toBe(syncOutput)
   })
 
+  it('matches the JS entry for unknown-extension filenames', async () => {
+    // unknown/no extension parses as plain JS (module, no JSX): TS/JSX syntax
+    // must throw, plain JS must succeed — on every entry identically
+    const filenames = ['input', 'input.txt', 'input.json', 'input.vue', 'Makefile']
+    const inputs = ['const x: number = 1;', 'const el = <div/>', 'const x = 1;']
+    for (const filename of filenames) {
+      for (const input of inputs) {
+        let jsOutput: string | undefined
+        let jsError: unknown
+        try {
+          jsOutput = transpile(input, { filename })
+        }
+        catch (error) {
+          jsError = error
+        }
+        if (jsError !== undefined) {
+          // rejection parity: both native entries reject with a SyntaxError
+          expect(() => transpileSync(input, { filename })).toThrow(SyntaxError)
+          await expect(transpileAsync(input, { filename })).rejects.toThrow(SyntaxError)
+          continue
+        }
+        expect(transpileSync(input, { filename })).toBe(jsOutput)
+        expect(await transpileAsync(input, { filename })).toBe(jsOutput)
+      }
+    }
+  })
+
+  it('rejects TS syntax on unknown-extension filenames on both entries', async () => {
+    const input = 'const x: number = 1;'
+    for (const filename of ['input', 'input.txt', 'input.vue']) {
+      expect(() => transpile(input, { filename })).toThrow(SyntaxError)
+      expect(() => transpileSync(input, { filename })).toThrow(SyntaxError)
+      await expect(transpileAsync(input, { filename })).rejects.toThrow(SyntaxError)
+    }
+  })
+
   it('formats seeded random doubles identically to JS on both entries', () => {
     // deterministic xorshift-style PRNG over raw f64 bit patterns, plus the
     // structured edge values (known ties, extremes, subnormals)
