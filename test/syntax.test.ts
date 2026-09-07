@@ -1,7 +1,7 @@
 import { parseSync } from 'oxc-parser'
 import tsBlankSpace from 'ts-blank-space'
 import { describe, expect, it } from 'vitest'
-import { transpile } from '../src/index'
+import { transpile } from './parity'
 
 /**
  * Cross-cutting erasure mechanics that do not belong to a single construct:

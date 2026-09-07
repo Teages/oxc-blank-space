@@ -1,6 +1,6 @@
 import tsBlankSpace from 'ts-blank-space'
 import { describe, expect, it } from 'vitest'
-import { transpile } from '../src/index'
+import { transpile } from './parity'
 
 /**
  * Unsupported constructs keep their source verbatim in the output (mirroring
