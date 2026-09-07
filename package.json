@@ -63,6 +63,7 @@
     "jiti": "2.7.0",
     "obuild": "^0.4.35",
     "oxc-parser": "^0.148.0",
+    "oxidase": "^0.0.3",
     "ts-blank-space": "^0.9.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"

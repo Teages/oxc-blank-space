@@ -47,6 +47,9 @@ importers:
       oxc-parser:
         specifier: ^0.148.0
         version: 0.148.0
+      oxidase:
+        specifier: ^0.0.3
+        version: 0.0.3
       ts-blank-space:
         specifier: ^0.9.0
         version: 0.9.0
@@ -2378,6 +2381,10 @@ packages:
   oxc-parser@0.148.0:
     resolution: {integrity: sha512-syxUKHeUll89RIABQADcI7sikYrwyssvA6gj4phSSIPezKVM8yMaLAiLLSc7fmzVvrwybfFGFbW5zme9sX87rg==}
     engines: {node: ^20.19.0 || >=22.12.0}
+
+  oxidase@0.0.3:
+    resolution: {integrity: sha512-b34YuOWiiFRSj06jYmJHVAqR1cqnG+W4fR4D8lvCFVIFm7Ysrf0E6ZLbfe9nJselZT/qjem0YlKRWtw2EBaIZQ==}
+    engines: {node: '>=18.20'}
 
   p-event@6.0.1:
     resolution: {integrity: sha512-Q6Bekk5wpzW5qIyUP4gdMEujObYstZl6DMMOSenwBvV0BlE5LkDwkjs5yHbZmdCEq2o4RJx4tE1vwxFVf2FG1w==}
@@ -5087,6 +5094,8 @@ snapshots:
       '@oxc-parser/binding-win32-arm64-msvc': 0.148.0
       '@oxc-parser/binding-win32-ia32-msvc': 0.148.0
       '@oxc-parser/binding-win32-x64-msvc': 0.148.0
+
+  oxidase@0.0.3: {}
 
   p-event@6.0.1:
     dependencies:

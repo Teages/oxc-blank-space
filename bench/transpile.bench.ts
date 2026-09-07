@@ -2,6 +2,8 @@ import type { TranspileOptions } from '../src/types'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { transpile as transpileOxidase } from 'oxidase'
+import tsBlankSpace from 'ts-blank-space'
 import { bench, describe } from 'vitest'
 import { transpile, transpileSync } from '../src/index'
 
@@ -28,7 +30,7 @@ enum Flags { A = 1 << 0, B = 1 << 1, C = A | B, D = C + 1 }
 const enum Private { X, Y = X * 2 }
 `.repeat(25)
 
-const samples: Array<{ name: string, input: string, options?: TranspileOptions }> = [
+const samples: Array<{ name: string, input: string, options?: TranspileOptions, tsBlankSpaceThrows?: boolean }> = [
   {
     name: 'inline',
     input: `const a: number = 1;\nfunction greet(name: string): string { return \`hi \${name}\`; }\ninterface Shape { area(): number }\n`,
@@ -44,12 +46,32 @@ const samples: Array<{ name: string, input: string, options?: TranspileOptions }
   {
     name: 'enum heavy',
     input: enumHeavy,
+    // ts-blank-space cannot transform enums; with a no-op onError it keeps
+    // them verbatim, so its numbers on this sample measure less work
+    tsBlankSpaceThrows: true,
   },
 ]
 
 describe('transpile', () => {
-  for (const { name, input, options } of samples) {
+  for (const { name, input, options, tsBlankSpaceThrows } of samples) {
+    // sanity: every implementation must accept the sample before timing it
+    // (vitest warms each benchmark on its own)
+    transpileOxidase(input)
+    tsBlankSpace(input, tsBlankSpaceThrows ? () => {} : undefined)
+    transpileSync(input, options)
+
     describe(name, () => {
+      // vitest's summary baselines the fastest implementation per scenario;
+      // oxidase (a no-AST Rust pipeline) is the reference point on small
+      // inputs and enum-heavy transformations
+      bench('oxidase', () => {
+        transpileOxidase(input)
+      })
+
+      bench('ts-blank-space', () => {
+        tsBlankSpace(input, tsBlankSpaceThrows ? () => {} : undefined)
+      })
+
       bench('transpileSync', () => {
         transpileSync(input, options)
       })

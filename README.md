@@ -127,31 +127,39 @@ build` workflow smoke-loads every shipped binary, including wasm, and a
 
 ## Benchmark
 
-`pnpm bench` runs `bench/transpile.bench.ts` (vitest bench) over both entry
-points. Measured on an Apple M-series laptop, Node 24:
+`pnpm bench` runs `bench/transpile.bench.ts` (vitest bench) over the two
+entry points plus the reference and the fastest known Rust competitor,
+[oxidase](https://github.com/branchseer/oxidase). Measured on an Apple
+M-series laptop, Node 24, normalized to oxidase's time:
 
-| input | transpileSync | transpile (async) |
-| --- | --- | --- |
-| inline snippet | 523k ops/s | 135k ops/s |
-| fixture corpus (~15KB) | 7.3k ops/s | 6.7k ops/s |
-| large (~100KB) | 848 ops/s | 830 ops/s |
-| enum heavy | 4.9k ops/s | 4.6k ops/s |
+| input | oxidase | ts-blank-space | transpileSync | transpile (async) |
+| --- | --- | --- | --- | --- |
+| inline snippet | **1.00x** (543k ops/s) | 2.4x | 1.04x | 3.9x |
+| fixture corpus (~15KB) | **1.00x** (7.2k ops/s) | 2.9x | **0.96x** | 1.06x |
+| large (~100KB) | **1.00x** (780 ops/s) | 2.7x | **0.89x** | 0.91x |
+| enum heavy | **1.00x** (7.4k ops/s) | 0.74x\* | 1.53x | 1.61x |
 
-The sync/async gap is the per-call fixed cost of the napi thread-pool hop
-(dispatch + promise plumbing, roughly 5µs here): on the tiny inline input
-`transpileSync` is ~3.9x faster than `transpile`; from the ~15KB fixture
-corpus upward the two converge to within ~10% (large input: on par, with the
-async entry keeping the main thread free). Rule of thumb: use
-`transpileSync` for small, frequent inputs; `transpile` once inputs are
-non-trivial or concurrency matters.
+\* on the enum sample ts-blank-space cannot transform enums and, with a
+no-op `onError`, keeps them verbatim — it does strictly less work there.
+
+In words: on multi-KB real-world inputs this library matches or slightly
+beats oxidase (whose pipeline runs at the speed of a bare oxc parse), and
+both are ~2.7–2.9x ahead of ts-blank-space there. On tiny inputs the two
+Rust pipelines tie at the napi call overhead (~2µs), 2.4x ahead of
+ts-blank-space. Enum expansion is the one scenario oxidase wins clearly: its
+rewrite keeps member source positions but emits a cheaper `this`-based
+initialization, while this library implements the exact TypeScript emitter
+shape with ECMAScript number formatting — pick it if that scenario dominates.
+
+Sync vs async carries its own constant gap (the napi thread-pool hop, ~5µs
+per call): on the tiny inline input `transpileSync` is ~3.8x faster than
+`transpile`; from the ~15KB corpus upward the two converge to within ~10%.
+Rule of thumb: use `transpileSync` for small, frequent inputs; `transpile`
+once inputs are non-trivial or concurrency matters.
 
 `native/src/lib.rs` contains an `#[ignore]`d measurement harness for the
 Rust-side numbers — run it with
 `cargo test --release perf_bench -- --ignored --nocapture` from `native/`.
-It reports the pipeline against its floor: a plain oxc parse of the same
-input (~730µs pipeline vs ~410µs parse floor over 111KB, i.e. ~1.8x; the
-remaining gap is the arena AST allocation upstream oxc always performs,
-which a no-AST fork like oxidase avoids at the cost of forking the parser).
 
 ## Comparison with ts-blank-space
 
