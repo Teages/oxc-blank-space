@@ -2,7 +2,7 @@
 name = "oxc-blank-space-native"
 version = "0.2.0"
 edition = "2024"
-license = "Apache-2.0"
+license = "MIT"
 description = "Native Rust implementation of @teages/oxc-blank-space"
 
 [lib]
