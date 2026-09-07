@@ -1,0 +1,165 @@
+name: native build
+
+# Builds the napi binding for every platform the loader in src/native.ts
+# can pick up (see platformBinary), cross-compiling wherever possible, and
+# smoke-loads each binary on matching hardware. Artifacts are named
+# `binding-<triple>` so a release pipeline can download the full matrix.
+on:
+  push:
+    branches: [main]
+    paths:
+      - native/**
+      - scripts/smoke-native.mjs
+      - .github/workflows/native-build.yml
+  pull_request:
+    paths:
+      - native/**
+      - scripts/smoke-native.mjs
+      - .github/workflows/native-build.yml
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS: Apple's toolchain cross-links both slices on the arm64 runner
+          - target: aarch64-apple-darwin
+            os: macos-15
+            artifact: oxc-blank-space-native.darwin-arm64.node
+            smoke: native
+          - target: x86_64-apple-darwin
+            os: macos-15
+            artifact: oxc-blank-space-native.darwin-x64.node
+            smoke: rosetta
+          # Linux: cargo-zigbuild provides the cross linker + libc; no glibc
+          # pin is passed (napi's artifact naming cannot carry the `.X.Y`
+          # suffix), so the ceiling check below guards the floor instead
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            artifact: oxc-blank-space-native.linux-x64-gnu.node
+            cross: true
+            smoke: native
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            artifact: oxc-blank-space-native.linux-x64-musl.node
+            cross: true
+            smoke: alpine
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04
+            artifact: oxc-blank-space-native.linux-arm64-gnu.node
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04
+            artifact: oxc-blank-space-native.linux-arm64-musl.node
+            cross: true
+          # Windows: the x64 runner's MSVC includes the ARM64 cross tools
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: oxc-blank-space-native.win32-x64-msvc.node
+            smoke: native
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            artifact: oxc-blank-space-native.win32-arm64-msvc.node
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm i -g corepack@latest && corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          key: ${{ matrix.target }}
+      - if: matrix.cross
+        uses: mlugg/setup-zig@v2
+      - if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - if: matrix.target == 'x86_64-apple-darwin'
+        # Node 20's oldest supported macOS; x86_64-apple-darwin defaults lower
+        run: echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
+      - name: Build
+        working-directory: native
+        run: >-
+          pnpm exec napi build --platform --release
+          ${{ matrix.cross && '--cross-compile' || '' }}
+          --target ${{ matrix.target }}
+          --output-dir ../dist
+      - if: endsWith(matrix.target, 'linux-gnu')
+        name: Check glibc symbol ceiling (Node 20 requires 2.28)
+        run: |
+          artifact="dist/${{ matrix.artifact }}"
+          max="$(objdump -T "$artifact" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -uV | tail -1)"
+          echo "highest GLIBC symbol requirement: ${max:-none}"
+          if [ -n "$max" ] && [ "$(printf '%s\nGLIBC_2.28\n' "$max" | sort -V | head -1)" = 'GLIBC_2.28' ]; then
+            echo "::error title=glibc ceiling::$artifact requires newer glibc symbols ($max) than Node 20's 2.28 floor"
+            exit 1
+          fi
+      - if: matrix.smoke == 'native'
+        name: Smoke test
+        run: node scripts/smoke-native.mjs dist/${{ matrix.artifact }}
+      - if: matrix.smoke == 'rosetta'
+        name: Install Rosetta 2 (no-op when already present)
+        run: softwareupdate --install-rosetta --agree-to-license || true
+      - if: matrix.smoke == 'rosetta'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: x64
+      - if: matrix.smoke == 'rosetta'
+        name: Smoke test (x64 Node under Rosetta)
+        run: node scripts/smoke-native.mjs dist/${{ matrix.artifact }}
+      - if: matrix.smoke == 'alpine'
+        name: Smoke test (musl static binary in Alpine)
+        run: >-
+          docker run --rm -v "$PWD":/work -w /work node:20-alpine
+          node scripts/smoke-native.mjs dist/${{ matrix.artifact }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-${{ matrix.target }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  # both arm64 Linux binaries are cross-built on x64; verify them on real
+  # arm64 hardware — the gnu one directly, the musl one inside an arm64
+  # Alpine container (native container on the arm64 runner, no qemu)
+  smoke-arm64-linux:
+    name: smoke aarch64 linux
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binding-aarch64-unknown-linux-*
+          merge-multiple: true
+          path: dist
+      - name: Smoke test (gnu, native arm64)
+        run: node scripts/smoke-native.mjs dist/oxc-blank-space-native.linux-arm64-gnu.node
+      - name: Smoke test (musl, arm64 Alpine)
+        run: >-
+          docker run --rm -v "$PWD":/work -w /work node:20-alpine
+          node scripts/smoke-native.mjs dist/oxc-blank-space-native.linux-arm64-musl.node
