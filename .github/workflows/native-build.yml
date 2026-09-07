@@ -76,7 +76,12 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
-      - run: npm i -g corepack@latest && corepack enable
+      - if: runner.os != 'Windows'
+        run: npm i -g corepack@latest && corepack enable
+      # the windows image ships corepack; reinstalling it globally collides
+      # with the preinstalled yarn shims (npm EEXIST)
+      - if: runner.os == 'Windows'
+        run: corepack enable
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -98,7 +103,14 @@ jobs:
       - if: matrix.target == 'x86_64-apple-darwin'
         # Node 20's oldest supported macOS; x86_64-apple-darwin defaults lower
         run: echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
-      - name: Build
+      - if: endsWith(matrix.target, 'linux-gnu')
+        name: Build (glibc pinned to Node 20's 2.28 floor)
+        working-directory: native
+        run: |
+          cargo zigbuild --release --target ${{ matrix.target }}.2.28
+          cp ../target/${{ matrix.target }}/release/liboxc_blank_space_native.so ../dist/${{ matrix.artifact }}
+      - if: ${{ !endsWith(matrix.target, 'linux-gnu') }}
+        name: Build
         working-directory: native
         run: >-
           pnpm exec napi build --platform --release
