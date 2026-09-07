@@ -72,6 +72,13 @@ jobs:
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             artifact: oxc-blank-space-native.win32-arm64-msvc.node
+          # WebAssembly for the browser entry; smoke-tested in Node through
+          # the generated .wasip1.cjs loader
+          - target: wasm32-wasip1
+            os: ubuntu-24.04
+            artifact: oxc-blank-space-native.wasm32-wasip1.wasm
+            wasm: true
+            smoke: wasm
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -110,7 +117,10 @@ jobs:
           cargo zigbuild --release --target ${{ matrix.target }}.2.28
           mkdir -p ../dist
           cp target/${{ matrix.target }}/release/liboxc_blank_space_native.so ../dist/${{ matrix.artifact }}
-      - if: ${{ !endsWith(matrix.target, 'linux-gnu') }}
+      - if: matrix.wasm
+        name: Build
+        run: node scripts/build-wasm.mjs
+      - if: ${{ !matrix.wasm && !endsWith(matrix.target, 'linux-gnu') }}
         name: Build
         working-directory: native
         run: >-
@@ -147,10 +157,23 @@ jobs:
         run: >-
           docker run --rm -v "$PWD":/work -w /work node:20-alpine
           node scripts/smoke-native.mjs dist/${{ matrix.artifact }}
-      - uses: actions/upload-artifact@v4
+      - if: matrix.smoke == 'wasm'
+        name: Smoke test (wasm binding in Node)
+        run: node scripts/smoke-native.mjs wasm/oxc-blank-space-native.wasip1.cjs
+      - if: ${{ !matrix.wasm }}
+        uses: actions/upload-artifact@v4
         with:
           name: binding-${{ matrix.target }}
           path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+      - if: matrix.wasm
+        uses: actions/upload-artifact@v4
+        with:
+          name: binding-${{ matrix.target }}
+          path: |
+            wasm/oxc-blank-space-native.wasm32-wasip1.wasm
+            wasm/oxc-blank-space-native.wasip1.cjs
+            wasm/oxc-blank-space-native.wasip1-browser.js
           if-no-files-found: error
 
   # both arm64 Linux binaries are cross-built on x64; verify them on real
