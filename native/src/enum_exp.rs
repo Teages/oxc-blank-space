@@ -67,12 +67,15 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
 
         if let Some(Expression::StringLiteral(literal)) = initializer {
             // String-valued members emit a plain property assignment without
-            // reverse mapping, matching the TypeScript emitter.
-            let raw = &w.src[literal.span().start as usize..literal.span().end as usize];
-            w.blanker.output.override_range(
+            // reverse mapping, matching the TypeScript emitter. The raw value
+            // text is taken from the original code units on the UTF-16 path —
+            // the lossy parse copy would corrupt raw lone surrogates.
+            let raw_units = w.original_span_units(literal.span);
+            w.blanker.output.override_range_units(
                 member_span.start,
                 member_span.end,
-                format!("{enum_name}[{key}] = {raw}"),
+                &format!("{enum_name}[{key}] = "),
+                &raw_units,
             );
             previous = None;
         } else if let Some(value) = constant {
@@ -177,7 +180,7 @@ fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
                         .flat_map(|c| {
                             let mut buf = [0u16; 2];
                             let encoded = c.encode_utf16(&mut buf);
-                            encoded.iter().copied().collect::<Vec<u16>>()
+                            encoded.to_vec()
                         })
                         .collect();
                     decode_units(&units)
@@ -212,7 +215,12 @@ fn decode_units(units: &[u16]) -> Vec<u16> {
         };
         i += 1;
         match escape {
-            0x0A | 0x0D | 0x2028 | 0x2029 => {} // line continuation
+            0x0A | 0x0D | 0x2028 | 0x2029 => {
+                // line continuation; a CR/LF pair is consumed together
+                if escape == 0x0D && units.get(i) == Some(&0x0A) {
+                    i += 1;
+                }
+            }
             0x62 => out.push(0x08),
             0x74 => out.push(0x09),
             0x6E => out.push(0x0A),
@@ -241,13 +249,16 @@ fn decode_units(units: &[u16]) -> Vec<u16> {
                         }
                         j += 1;
                     }
-                    if units.get(j) == Some(&0x7D)
-                        && value <= 0x10FFFF
-                        && !(0xD800..=0xDFFF).contains(&value)
-                    {
-                        let mut buf = [0u16; 2];
-                        let encoded = char::from_u32(value).unwrap().encode_utf16(&mut buf);
-                        out.extend(encoded.iter().copied());
+                    if units.get(j) == Some(&0x7D) && value <= 0x10FFFF {
+                        // lone surrogates stay as single units; JSON.stringify
+                        // re-escapes them exactly like the JS implementation
+                        if (0xD800..=0xDFFF).contains(&value) {
+                            out.push(value as u16);
+                        } else {
+                            let mut buf = [0u16; 2];
+                            let encoded = char::from_u32(value).unwrap().encode_utf16(&mut buf);
+                            out.extend(encoded.iter().copied());
+                        }
                         i = j + 1;
                     } else {
                         out.push(0x75);
@@ -264,13 +275,13 @@ fn decode_units(units: &[u16]) -> Vec<u16> {
             }
             0x30..=0x37 => {
                 // legacy octal escape: up to 3 digits total
-                let mut value = (escape - 0x30) as u16;
+                let mut value = escape - 0x30;
                 let mut count = 1usize;
                 while count < 3
                     && let Some(&digit) = units.get(i)
                     && (0x30..=0x37).contains(&digit)
                 {
-                    value = value * 8 + (digit - 0x30) as u16;
+                    value = value * 8 + (digit - 0x30);
                     i += 1;
                     count += 1;
                 }

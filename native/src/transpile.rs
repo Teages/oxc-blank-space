@@ -97,6 +97,9 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         if is_high && next_low {
             let code = 0x10000 + (((unit - 0xD800) as u32) << 10) + (units[index + 1] - 0xDC00) as u32;
             copy.extend_from_slice(char::from_u32(code).expect("valid pair").encode_utf8(&mut buf).as_bytes());
+            // the low surrogate needs its own map entry (pointing at the end
+            // of the astral char) or every later unit index shifts by one
+            byte_to_unit.push(copy.len() as u32);
             index += 2;
         } else if unit == 0x0A || unit == 0x0D {
             copy.push(unit as u8);
@@ -158,32 +161,34 @@ pub fn transpile_units_caught(
     units: &[u16],
     filename: &str,
 ) -> Result<TranspileUnitsOutput, String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile_units(units, filename)))
-        .unwrap_or_else(|payload| {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile_units(units, filename))) {
+        Ok(result) => result,
+        Err(payload) => {
             let detail = payload
                 .downcast_ref::<String>()
                 .cloned()
                 .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
                 .unwrap_or_else(|| "panic".to_string());
             Err(format!("internal error: {detail}"))
-        })
-        .and_then(Ok)
+        }
+    }
 }
 
 /// [`transpile`] with panic containment: a bug in an untested AST corner must
 /// surface as a JS exception, not abort the process (napi does not catch
 /// unwinds by default, for either the sync binding or async task compute).
 pub fn transpile_caught(input: &str, filename: &str) -> Result<TranspileOutput, String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile(input, filename)))
-        .unwrap_or_else(|payload| {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile(input, filename))) {
+        Ok(result) => result,
+        Err(payload) => {
             let detail = payload
                 .downcast_ref::<String>()
                 .cloned()
                 .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
                 .unwrap_or_else(|| "panic".to_string());
             Err(format!("internal error: {detail}"))
-        })
-        .and_then(Ok)
+        }
+    }
 }
 
 #[cfg(test)]

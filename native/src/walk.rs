@@ -176,6 +176,12 @@ pub fn blank_program_utf16<'a>(
     (output, take(&mut walker.blanker.reports))
 }
 
+/// Unit index of the unit starting at byte offset `pos` (byte-to-unit maps
+/// are strictly increasing).
+pub(crate) fn unit_at(byte_to_unit: &[u32], pos: u32) -> u32 {
+    byte_to_unit.partition_point(|&b| b < pos) as u32
+}
+
 /// Flat index of a `Statement` (which inherits `Declaration` and
 /// `ModuleDeclaration` variants in the native AST).
 pub(crate) fn statement_index(stmt: &Statement<'_>) -> u32 {
@@ -335,6 +341,27 @@ impl<'a> Walker<'a> {
     ) -> VisitResult {
         let indices: Vec<u32> = statements.iter().map(statement_index).collect();
         self.visit_node_array(&indices, is_statement_like, is_function_body)
+    }
+
+    /// The source text of `span` as UTF-16 code units — from the original
+    /// units on the UTF-16 path (lossless for lone surrogates), from the
+    /// parse copy otherwise.
+    pub(crate) fn original_span_units(&self, span: Span) -> Vec<u16> {
+        match (self.units, self.byte_to_unit) {
+            (Some(units), Some(byte_to_unit)) => {
+                let u0 = crate::walk::unit_at(byte_to_unit, span.start) as usize;
+                let u1 = crate::walk::unit_at(byte_to_unit, span.end) as usize;
+                units[u0..u1].to_vec()
+            }
+            _ => self.src[span.start as usize..span.end as usize]
+                .chars()
+                .flat_map(|c| {
+                    let mut buf = [0u16; 2];
+                    let encoded = c.encode_utf16(&mut buf);
+                    encoded.to_vec()
+                })
+                .collect(),
+        }
     }
 
     /// The child of `parent` whose span equals `span`.

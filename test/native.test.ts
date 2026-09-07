@@ -190,6 +190,39 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     }
   })
 
+  it('matches JS for escaped surrogate enum string values', async () => {
+    const input = 'enum E { A = "\\uD800" }'
+    const jsOutput = transpile(input)
+    // string values keep the raw source text verbatim (escape case intact)
+    expect(jsOutput).toContain('\\uD800')
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('matches JS for raw lone-surrogate enum string values (UTF-16 path)', async () => {
+    const input = `enum E { A = "${String.fromCharCode(0xD800)}" }`
+    const jsOutput = transpile(input)
+    expect(jsOutput).toContain(String.fromCharCode(0xD800))
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('decodes CRLF line continuations in enum member keys', async () => {
+    const input = 'enum E { "a\\\r\nb" = 3 }'
+    const jsOutput = transpile(input)
+    expect(jsOutput).toContain('"ab"')
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('matches JS for brace unicode escapes in enum member keys', async () => {
+    const input = 'enum E { "\\u{D800}" = 1 }'
+    const jsOutput = transpile(input)
+    expect(jsOutput).toContain('\\ud800')
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
   it('formats seeded random doubles identically to JS on both entries', () => {
     // deterministic xorshift-style PRNG over raw f64 bit patterns, plus the
     // structured edge values (known ties, extremes, subnormals)

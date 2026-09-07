@@ -14,14 +14,31 @@ const REPLACE_WITH_TEXT: u8 = 4;
 pub struct BlankString {
     /// Flat (flags, start, end, textIndex) tuples, pushed in source order.
     ranges: Vec<(u8, u32, u32, u32)>,
-    texts: Vec<String>,
+    /// Override texts as UTF-16 units — the only lossless form shared by the
+    /// String path and the UTF-16 path (raw lone surrogates can appear on the
+    /// UTF-16 path and must survive into the output).
+    texts: Vec<Vec<u16>>,
 }
 
 impl BlankString {
     /// Replace [start, end) with `text`; `end` may equal `start` to insert.
-    pub fn override_range(&mut self, start: u32, end: u32, text: impl Into<String>) {
+    pub fn override_range(&mut self, start: u32, end: u32, text: impl AsRef<str>) {
+        self.override_range_units(start, end, "", &text.as_ref().encode_utf16().collect::<Vec<u16>>());
+    }
+
+    /// [`override_range`](Self::override_range) with the replacement given as
+    /// UTF-16 units — required when the text contains raw lone surrogates.
+    pub fn override_range_units(
+        &mut self,
+        start: u32,
+        end: u32,
+        prefix: &str,
+        units: &[u16],
+    ) {
         let index = self.texts.len() as u32;
-        self.texts.push(text.into());
+        let mut text: Vec<u16> = prefix.encode_utf16().collect();
+        text.extend_from_slice(units);
+        self.texts.push(text);
         self.ranges.push((REPLACE_WITH_TEXT, start, end, index));
     }
 
@@ -70,9 +87,11 @@ impl BlankString {
 
             let mut range_start = range_start;
             match flags {
-                REPLACE_WITH_TEXT => {
-                    out.extend_from_slice(self.texts[text_index as usize].as_bytes())
-                }
+                REPLACE_WITH_TEXT => out.extend_from_slice(
+                    String::from_utf16(&self.texts[text_index as usize])
+                        .expect("String-path texts are valid UTF-16")
+                        .as_bytes(),
+                ),
                 REPLACE_WITH_CLOSE_PAREN => {
                     out.push(b')');
                     range_start += 1;
@@ -135,26 +154,6 @@ fn write_space(out: &mut Vec<u8>, input: &str, start: u32, end: u32) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn blank_preserves_newlines_and_length() {
-        let input = "const a: number = 1";
-        let mut bs = BlankString::default();
-        // Blank the `: number` annotation (8 chars, no newlines).
-        bs.blank(7, 15);
-        assert_eq!(bs.build(input), format!("const a{} = 1", " ".repeat(8)));
-    }
-
-    #[test]
-    fn no_ranges_returns_input() {
-        let bs = BlankString::default();
-        assert_eq!(bs.build("abc"), "abc");
-    }
-}
-
 impl BlankString {
     /// UTF-16 variant of [`build`](Self::build) for the lossless UTF-16 path:
     /// the input is the original code units, `byte_to_unit` maps every parse
@@ -175,7 +174,7 @@ impl BlankString {
         let mut extra = 0usize;
         for &(flags, start, end, text_index) in &self.ranges {
             if flags == REPLACE_WITH_TEXT {
-                let len = self.texts[text_index as usize].encode_utf16().count();
+                let len = self.texts[text_index as usize].len();
                 let u0 = unit_at(start);
                 let u1 = unit_at(end);
                 extra += len.saturating_sub(u1 - u0);
@@ -189,15 +188,11 @@ impl BlankString {
         for &(flags, start, end, text_index) in &self.ranges {
             let range_start = start.max(previous_end);
             let range_unit = unit_at(range_start);
-            out.extend_from_slice(&units[previous_unit as usize..range_unit]);
+            out.extend_from_slice(&units[previous_unit..range_unit]);
 
             let mut range_unit = range_unit;
             match flags {
-                REPLACE_WITH_TEXT => {
-                    for unit in self.texts[text_index as usize].encode_utf16() {
-                        out.push(unit);
-                    }
-                }
+                REPLACE_WITH_TEXT => out.extend_from_slice(&self.texts[text_index as usize]),
                 REPLACE_WITH_CLOSE_PAREN => {
                     out.push(0x29);
                     range_unit += 1;
@@ -216,7 +211,7 @@ impl BlankString {
             previous_end = end;
             if flags != REPLACE_WITH_TEXT {
                 let end_unit = unit_at(previous_end);
-                for &unit in &units[range_unit as usize..end_unit as usize] {
+                for &unit in &units[range_unit..end_unit] {
                     out.push(match unit {
                         0x0A | 0x0D => unit,
                         _ => 0x20,
@@ -226,7 +221,27 @@ impl BlankString {
             previous_unit = unit_at(previous_end);
         }
 
-        out.extend_from_slice(&units[previous_unit as usize..]);
+        out.extend_from_slice(&units[previous_unit..]);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blank_preserves_newlines_and_length() {
+        let input = "const a: number = 1";
+        let mut bs = BlankString::default();
+        // Blank the `: number` annotation (8 chars, no newlines).
+        bs.blank(7, 15);
+        assert_eq!(bs.build(input), format!("const a{} = 1", " ".repeat(8)));
+    }
+
+    #[test]
+    fn no_ranges_returns_input() {
+        let bs = BlankString::default();
+        assert_eq!(bs.build("abc"), "abc");
     }
 }
