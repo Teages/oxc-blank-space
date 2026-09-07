@@ -1,51 +1,69 @@
+import type { NativeBinding } from './api'
 import type { TranspileOptions } from './types'
-import { parseSync } from 'oxc-parser'
-import { blankProgram } from './visitor/walk'
+import { readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+import { createApi } from './api'
 
 export type { OnError, TranspileOptions, UnsupportedSyntax } from './types'
 
+// '../dist' resolves correctly both from the bundled `dist/index.mjs`
+// (dist/../dist) and from `src/index.ts` when vitest runs the sources
+const distDir = resolve(dirname(fileURLToPath(import.meta.url)), '../dist')
+
 /**
- * Replace TypeScript-only syntax with whitespace, keeping the remaining
- * JavaScript byte-for-byte at its original line and column positions.
- *
- * ```
- * import { transpile } from '@teages/oxc-blank-space'
- *
- * transpile(`const a: number = 1`)
- * // 'const a         = 1'
- * ```
- *
- * Runtime TypeScript features (enums, namespaces with runtime code, parameter
- * properties, `export =`, `import x = require(...)` and `<T>expr` assertions)
- * cannot be blanked: they are kept verbatim and reported through
- * `options.onError`. Inputs that are not valid TypeScript — including `as`/
- * `satisfies` erasures that would change operator grouping, which TypeScript
- * itself rejects — throw a `SyntaxError`.
+ * The napi artifact for the running platform, e.g.
+ * `oxc-blank-space-native.darwin-arm64.node`, `...-linux-x64-gnu.node` (the
+ * libc variant matched against the runtime) or `...-win32-x64-msvc.node`.
+ * Returns undefined when no matching binary exists — loading a binary built
+ * for another platform or libc would fail anyway, just with a confusing
+ * dynamic-linking error.
  */
-export function transpile(
-  input: string,
-  options: TranspileOptions = {},
-): string {
-  const filename
-    = options.filename ?? (options.lang === 'tsx' ? 'input.tsx' : 'input.ts')
-  const parsed = parseSync(filename, input, { sourceType: 'module' })
-
-  // Hard parse failures leave no usable AST: the input is not valid
-  // TypeScript, so surface it as a syntax error rather than silently
-  // passing TypeScript through as if it were JavaScript. (Soft parse
-  // errors still produce a recovered AST, which we process like
-  // ts-blank-space does for TypeScript's recovered trees.)
-  if (parsed.program.body.length === 0 && parsed.errors.length > 0) {
-    const details = parsed.errors
-      .map(error => error.codeframe || error.message)
-      .join('\n')
-    throw new SyntaxError(`failed to parse ${filename}:\n${details}`)
-  }
-
-  return blankProgram(
-    parsed.program,
-    input,
-    parsed.comments,
-    options.onError,
-  )
+function platformBinary(): string | undefined {
+  const base = `oxc-blank-space-native.${process.platform}-${process.arch}`
+  const binaries = readdirSync(distDir).filter(file => file.endsWith('.node')).sort()
+  const candidates = (() => {
+    switch (process.platform) {
+      case 'linux': {
+        // process.report carries the glibc version only when linked against
+        // glibc; the other libc variant is not a fallback — it cannot load.
+        const report = process.report as
+          | { getReport?: () => { header?: { glibcVersionRuntime?: string } } }
+          | undefined
+        const musl = report?.getReport?.().header?.glibcVersionRuntime === undefined
+        return musl ? [`${base}-musl.node`] : [`${base}-gnu.node`]
+      }
+      case 'win32':
+        return [`${base}-msvc.node`]
+      default:
+        return [`${base}.node`]
+    }
+  })()
+  return candidates.find(name => binaries.includes(name))
 }
+
+function loadNodeBinding(): NativeBinding | undefined {
+  const binary = platformBinary()
+  if (!binary) {
+    return undefined
+  }
+  return createRequire(import.meta.url)(join(distDir, binary))
+}
+
+const api = createApi(loadNodeBinding)
+
+/**
+ * Whether a native binary matching this platform was shipped with the
+ * package. When false, {@link transpile} and {@link transpileSync} throw on
+ * use and the browser entry (`@teages/oxc-blank-space/browser`) is the
+ * alternative.
+ */
+export const nativeBindingAvailable = api.isAvailable
+
+export const transpile: (input: string, options?: TranspileOptions) => Promise<string>
+  = api.transpile
+
+export const transpileSync: (input: string, options?: TranspileOptions) => string
+  = api.transpileSync

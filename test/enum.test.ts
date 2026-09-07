@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { transpile } from '../src/index'
+import { transpile } from './parity'
 
 /**
  * Enum expansion mirrors the TypeScript emitter. These tests pin the emitted

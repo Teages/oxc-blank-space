@@ -11,13 +11,21 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.mts",
+      "import": "./dist/browser.mjs"
     }
   },
   "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "typesVersions": {
     "*": {
       ".": [
         "./dist/index.d.mts"
+      ],
+      "browser": [
+        "./dist/browser.d.mts"
       ]
     }
   },
@@ -28,7 +36,10 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "obuild",
+    "build": "node scripts/assemble-dist.mjs",
+    "build:native": "cd native && napi build --platform --release --output-dir ../binaries",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:js": "obuild",
     "play:prepare": "obuild --stub",
     "play": "pnpm -C playground play",
     "dev": "vitest dev",
@@ -36,18 +47,24 @@
     "lint:fix": "eslint --cache --fix .",
     "prepack": "pnpm build",
     "test": "pnpm lint && pnpm test:types && vitest run --coverage",
-    "test:types": "tsc --noEmit --skipLibCheck"
-  },
-  "dependencies": {
-    "oxc-parser": "^0.148.0"
+    "test:types": "tsc --noEmit --skipLibCheck",
+    "bench": "vitest bench --run"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^9.0.0",
+    "@emnapi/core": "2.0.0-alpha.5",
+    "@emnapi/runtime": "2.0.0-alpha.5",
+    "@napi-rs/cli": "^3.9.0",
+    "@napi-rs/wasm-runtime": "^1.2.3",
+    "@tybys/wasm-util": "^0.10.3",
     "@types/node": "^24.12.4",
     "@vitest/coverage-v8": "^4.1.6",
+    "emnapi": "2.0.0-alpha.5",
     "eslint": "^10.3.0",
     "jiti": "2.7.0",
     "obuild": "^0.4.35",
+    "oxc-parser": "^0.148.0",
+    "oxidase": "^0.0.3",
     "ts-blank-space": "^0.9.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6"

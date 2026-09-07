@@ -5,3 +5,10 @@ dist
 .eslintcache
 *.log*
 *.env*
+
+# rust
+native/target
+
+# build staging
+wasm
+binaries

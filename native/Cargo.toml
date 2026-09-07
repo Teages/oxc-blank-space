@@ -1,0 +1,30 @@
+[package]
+name = "oxc-blank-space-native"
+version = "0.2.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Native Rust implementation of @teages/oxc-blank-space"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+oxc_allocator = { version = "0.148.0", features = ["pool"] }
+oxc_parser = "0.148.0"
+oxc_ast = "0.148.0"
+oxc_ast_visit = "0.148.0"
+oxc_span = "0.148.0"
+oxc_syntax = "0.148.0"
+dtoa = "1"
+oxc_diagnostics = "0.148.0"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = "thin"
+# drop the symbol table + debug info; the dynamic exports napi loads through
+# stay. distribution size matters: every shipped target is ~1.5 MB otherwise
+strip = "symbols"

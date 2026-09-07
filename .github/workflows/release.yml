@@ -64,9 +64,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # the chained dispatch lands here on the vX.Y.Z tag; build the tarball(s)
+  # the chained dispatch lands here on the vX.Y.Z tag; build every platform
+  # binary + the wasm module first, then let pack assemble the tarball from
+  # the prebuilt artifacts (NAPI_PREBUILT_DIR)
+  native:
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/native-build.yml
+    permissions:
+      contents: read
+
+  # build the tarball(s) from the prebuilt binaries
   pack:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    needs: native
     runs-on: ubuntu-latest
     concurrency:
       group: pack-${{ github.ref }}
@@ -74,7 +84,15 @@ jobs:
     permissions: {}
     outputs:
       files: ${{ steps.pack.outputs.files }}
+    env:
+      # downloaded outside the workspace so the pack checkout cannot wipe it
+      NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binding-*
+          path: ${{ runner.temp }}/native-bindings
+          merge-multiple: true
       - id: pack
         uses: danielroe/uppt/pack@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
 
