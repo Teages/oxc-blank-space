@@ -141,9 +141,9 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     // them with U+FFFD, while the JS implementation passes them through.
     // Rust cannot represent them losslessly, so this divergence is kept
     // (and pinned here) rather than fixed.
-    const input = `// ${String.fromCodePoint(0xD800)}\nlet a = 1;`
+    const input = `// ${String.fromCharCode(0xD800)}\nlet a = 1;`
     const jsOutput = transpile(input)
-    expect(jsOutput).toContain(String.fromCodePoint(0xD800))
+    expect(jsOutput).toContain(String.fromCharCode(0xD800))
     const syncOutput = transpileSync(input)
     expect(syncOutput.length).toBe(jsOutput.length)
     expect(syncOutput).toContain('\uFFFD')

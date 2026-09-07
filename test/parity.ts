@@ -1,6 +1,6 @@
+import type { TranspileOptions, UnsupportedSyntax } from '../src/index'
 import { afterAll, expect } from 'vitest'
 import { transpile as transpileJs } from '../src/index'
-import type { TranspileOptions, UnsupportedSyntax } from '../src/index'
 import { nativeBindingAvailable, transpileAsync, transpileSync } from '../src/native'
 
 /**
@@ -31,7 +31,7 @@ export function transpile(input: string, options: TranspileOptions = {}): string
   try {
     js = transpileJs(input, {
       ...options,
-      onError: node => {
+      onError: (node) => {
         jsReports.push(node)
         options.onError?.(node)
       },

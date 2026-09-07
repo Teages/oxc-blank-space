@@ -98,6 +98,30 @@ the fixture corpus and inline cases.
 > Experimental: both entries report `onError` after transpilation rather than
 > during it, and the binary must be built per-platform (`pnpm build:native`).
 
+> [!NOTE]
+> Experimental: both entries report `onError` after transpilation rather than
+> during it, and the binary must be built per-platform (`pnpm build:native`).
+
+### Known divergences from the JS implementation
+
+- **Raw lone surrogates** in the input cannot survive the UTF-8 boundary:
+  napi replaces them with U+FFFD where the JS implementation passes the
+  character through. Every other astral character is handled exactly. This is
+  inherent to a Rust implementation (Rust strings cannot hold lone
+  surrogates) and pinned by a test.
+- **Parse-error messages** carry the raw diagnostics rather than the JS
+  entry's codeframe rendering; the error type (`SyntaxError`) and the
+  "failed to parse <filename>" prefix match.
+- **Distribution**: releases currently ship a single binary; the loader
+  prefers the artifact matching `process.platform`/`process.arch` and falls
+  back to whatever is present. Shipping per-platform packages (napi optional
+  dependencies + a build matrix in the release workflow) is the remaining
+  step before making a native entry the default export.
+
+With those caveats, the behavior suites (`test/*.test.ts`) run every test
+against both native entries in addition to the JS implementation, so the
+three implementations stay byte-for-byte identical on every covered input.
+
 ## Benchmark
 
 `pnpm bench` runs `bench/transpile.bench.ts` (vitest bench) comparing the JS

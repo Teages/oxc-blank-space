@@ -2,6 +2,7 @@ import type { TranspileOptions } from './types'
 import { readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
+import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
 export type { OnError, TranspileOptions, UnsupportedSyntax } from './types'
