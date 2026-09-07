@@ -119,10 +119,11 @@ the fixture corpus and inline cases.
 - **Distribution**: the loader matches the artifact by
   `process.platform`/`process.arch` and, on Linux, glibc vs musl (strict — a
   wrong-libc binary is never loaded), and on Windows expects the `-msvc`
-  artifact. The release workflow still builds a single platform; publishing
-  per-platform packages (napi optional dependencies + a build matrix in the
-  release workflow) is the remaining step before making a native entry the
-  default export.
+  artifact. The `native build` workflow builds all eight matching targets
+  (darwin-x64/arm64, linux-x64/arm64 × gnu/musl, win32-x64/arm64) on every
+  native change — six of them cross-compiled — and smoke-loads each binary on
+  matching hardware. Wiring those artifacts into the release pipeline is the
+  remaining step before making a native entry the default export.
 
 With those caveats, the behavior suites (`test/*.test.ts`) run every test
 against both native entries in addition to the JS implementation, so the
