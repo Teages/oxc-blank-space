@@ -116,9 +116,6 @@ the fixture corpus and inline cases.
   matching the original source's runtime semantics. This is the one input
   class where the native output intentionally differs from the JS
   implementation.
-- **Parse-error messages** carry the raw diagnostics rather than the JS
-  entry's codeframe rendering; the error type (`SyntaxError`) and the
-  "failed to parse <filename>" prefix match.
 - **Distribution**: the loader matches the artifact by
   `process.platform`/`process.arch` and, on Linux, glibc vs musl (strict — a
   wrong-libc binary is never loaded), and on Windows expects the `-msvc`

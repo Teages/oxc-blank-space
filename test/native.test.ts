@@ -317,6 +317,35 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     }
   })
 
+  it('produces byte-identical SyntaxError messages to the JS entry', async () => {
+    // codeframes render with the same oxc reporter on both sides
+    const input = 'let a: string = 1'
+    const filename = 'app.js'
+    const capture = (fn: () => string): string => {
+      try {
+        fn()
+      }
+      catch (error) {
+        return (error as SyntaxError).message
+      }
+      return expect.fail('expected the input to be rejected')
+    }
+    const jsMessage = capture(() => transpile(input, { filename }))
+    expect(jsMessage).toContain('failed to parse app.js:')
+    expect(capture(() => transpileSync(input, { filename }))).toBe(jsMessage)
+    await expect(transpileAsync(input, { filename })).rejects.toThrow(
+      SyntaxError,
+    )
+    let asyncMessage = ''
+    try {
+      await transpileAsync(input, { filename })
+    }
+    catch (error) {
+      asyncMessage = (error as SyntaxError).message
+    }
+    expect(asyncMessage).toBe(jsMessage)
+  })
+
   it('formats seeded random doubles identically to JS on both entries', () => {
     // deterministic xorshift-style PRNG over raw f64 bit patterns, plus the
     // structured edge values (known ties, extremes, subnormals)

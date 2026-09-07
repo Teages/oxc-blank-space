@@ -3,6 +3,7 @@
 use std::sync::OnceLock;
 
 use oxc_allocator::{Allocator, AllocatorPool};
+use oxc_diagnostics::NamedSource;
 use oxc_parser::config::TokensParserConfig;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
@@ -65,10 +66,18 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
         && return_value.program.directives.is_empty()
         && return_value.diagnostics.has_errors()
     {
+        // render each diagnostic with its codeframe — the default oxc
+        // reporter produces byte-identical output to the codeframes the JS
+        // entry receives from oxc-parser
         let details = return_value
             .diagnostics
             .iter()
-            .map(|d| d.message.to_string())
+            .map(|d| {
+                d.clone().render_with_source_code(NamedSource::new(
+                    filename,
+                    input.to_string(),
+                ))
+            })
             .collect::<Vec<_>>()
             .join("\n");
         return Err(format!("failed to parse {filename}:\n{details}"));
@@ -132,10 +141,17 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         && return_value.program.directives.is_empty()
         && return_value.diagnostics.has_errors()
     {
+        // codeframes render against the lossy parse copy (raw lone surrogates
+        // were already replaced there)
         let details = return_value
             .diagnostics
             .iter()
-            .map(|d| d.message.to_string())
+            .map(|d| {
+                d.clone().render_with_source_code(NamedSource::new(
+                    filename,
+                    parse_copy.clone(),
+                ))
+            })
             .collect::<Vec<_>>()
             .join("\n");
         return Err(format!("failed to parse {filename}:\n{details}"));
