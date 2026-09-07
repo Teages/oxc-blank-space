@@ -26,18 +26,25 @@ interface NativeBinding {
   transpileAsync: (input: string, options?: NativeOptions) => Promise<NativeResult>
   transpileNativeSync: (input: string, options?: NativeOptions) => NativeResult
 }
+const nativeDir = resolve(dirname(fileURLToPath(import.meta.url)), '../dist')
+
+/**
+ * The napi artifact for the running platform, e.g.
+ * `oxc-blank-space-native.darwin-arm64.node`.
+ */
+function platformBinary(): string | undefined {
+  const preferred = `oxc-blank-space-native.${process.platform}-${process.arch}.node`
+  const binaries = readdirSync(nativeDir).filter(file => file.endsWith('.node')).sort()
+  return binaries.includes(preferred) ? preferred : binaries[0]
+}
+
 /**
  * Whether the native binary has been built (`pnpm build:native`). The
  * experimental-native entry point throws on use when it is not.
  */
 export const nativeBindingAvailable: boolean = (() => {
   try {
-    // Both the TS source (src/native.ts) and the bundled artifact
-    // (dist/native.mjs) resolve to the same dist directory.
-    const nativeDir = resolve(dirname(fileURLToPath(import.meta.url)), '../dist')
-    const binary = readdirSync(nativeDir)
-      .filter(file => file.endsWith('.node'))
-      .sort()[0]
+    const binary = platformBinary()
     if (!binary) {
       return false
     }
@@ -50,10 +57,7 @@ export const nativeBindingAvailable: boolean = (() => {
 
 const binding: NativeBinding | undefined = nativeBindingAvailable
   ? (() => {
-      const nativeDir = resolve(dirname(fileURLToPath(import.meta.url)), '../dist')
-      const binary = readdirSync(nativeDir)
-        .filter(file => file.endsWith('.node'))
-        .sort()[0]!
+      const binary = platformBinary()!
       return createRequire(import.meta.url)(join(nativeDir, binary))
     })()
   : undefined
@@ -124,12 +128,16 @@ export function transpileSync(
   input: string,
   options: TranspileOptions = {},
 ): string {
+  // Only the binding call is wrapped into a SyntaxError (parse failures);
+  // exceptions thrown from `options.onError` must propagate unchanged,
+  // matching the JS implementation and `transpileAsync`.
+  let result: NativeResult
   try {
-    const result = requireBinding().transpileNativeSync(input, toNativeOptions(options))
-    dispatchReports(result.unsupported, options)
-    return result.code
+    result = requireBinding().transpileNativeSync(input, toNativeOptions(options))
   }
   catch (error) {
     throw new SyntaxError(error instanceof Error ? error.message : String(error))
   }
+  dispatchReports(result.unsupported, options)
+  return result.code
 }

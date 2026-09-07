@@ -117,6 +117,25 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     expect(syncOutput).toContain('1000000000000000100')
   })
 
+  it('propagates onError exceptions unchanged from both entries', async () => {
+    const input = `class C { constructor(private a: string) {} }`
+    const sentinel = new Error('sentinel from onError')
+    await expect(
+      transpileAsync(input, {
+        onError: () => {
+          throw sentinel
+        },
+      }),
+    ).rejects.toBe(sentinel)
+    expect(() =>
+      transpileSync(input, {
+        onError: () => {
+          throw sentinel
+        },
+      }),
+    ).toThrow(sentinel)
+  })
+
   it('documents lossy handling of raw lone surrogates', () => {
     // Raw lone surrogates cannot survive the UTF-8 boundary: napi replaces
     // them with U+FFFD, while the JS implementation passes them through.
