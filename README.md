@@ -132,10 +132,10 @@ points. Measured on an Apple M-series laptop, Node 24:
 
 | input | transpileSync | transpile (async) |
 | --- | --- | --- |
-| inline snippet | 530.9k ops/s | 137.2k ops/s |
-| fixture corpus (~15KB) | 9.1k ops/s | 8.2k ops/s |
-| large (~100KB) | 1.0k ops/s | 1.0k ops/s |
-| enum heavy | 8.9k ops/s | 7.9k ops/s |
+| inline snippet | 523k ops/s | 135k ops/s |
+| fixture corpus (~15KB) | 7.3k ops/s | 6.7k ops/s |
+| large (~100KB) | 848 ops/s | 830 ops/s |
+| enum heavy | 4.9k ops/s | 4.6k ops/s |
 
 The sync/async gap is the per-call fixed cost of the napi thread-pool hop
 (dispatch + promise plumbing, roughly 5µs here): on the tiny inline input
