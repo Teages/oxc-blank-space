@@ -1,33 +1,18 @@
 import type { TranspileOptions, UnsupportedSyntax } from '../src/index'
-import process from 'node:process'
 import { afterAll, expect } from 'vitest'
-import { transpile as transpileJs } from '../src/index'
-import { nativeBindingAvailable, transpileAsync, transpileSync } from '../src/native'
+import { transpile as transpileAsync, transpileSync } from '../src/index'
 
 /**
- * Checked replacement for `transpile` in the behavior suites: runs the JS
- * implementation the tests were written against, and — when the native binary
- * is built — asserts that `transpileSync`/`transpileAsync` produce the same
- * output, the same onError reports, and the same rejection behavior.
- *
- * Async checks cannot await inline (the behavior tests are synchronous), so
- * they are queued and flushed in this file's afterAll; a failure there fails
- * the whole file.
+ * The behavior suites run against the synchronous API, and every call is
+ * cross-checked against the asynchronous API in this file's afterAll: output,
+ * onError reports and rejection messages must match byte for byte.
  */
 const asyncChecks: Array<() => Promise<void>> = []
-
-// CI sets NATIVE_REQUIRED so a missing binary fails the run instead of
-// silently skipping every native comparison below.
-if (process.env.NATIVE_REQUIRED === '1' && !nativeBindingAvailable) {
-  throw new Error(
-    'NATIVE_REQUIRED=1 but the native binary is missing; run pnpm build:native',
-  )
-}
 
 afterAll(async () => {
   for (const [index, check] of asyncChecks.entries()) {
     await check().catch((error: unknown) => {
-      throw new Error(`native async parity failed (queued check #${index})`, {
+      throw new Error(`async transpile mismatch (queued check #${index})`, {
         cause: error,
       })
     })
@@ -35,54 +20,46 @@ afterAll(async () => {
 })
 
 export function transpile(input: string, options: TranspileOptions = {}): string {
-  const jsReports: UnsupportedSyntax[] = []
-  let js: string
+  const reports: UnsupportedSyntax[] = []
+  let output: string
   try {
-    js = transpileJs(input, {
+    output = transpileSync(input, {
       ...options,
       onError: (node) => {
-        jsReports.push(node)
+        reports.push(node)
         options.onError?.(node)
       },
     })
   }
-  catch (jsError) {
-    // rejection parity: both native entries must reject with a SyntaxError
-    // (wording differs — the JS error carries the codeframe — so only the
-    // type is asserted; the original JS error is rethrown to the test)
-    if (nativeBindingAvailable) {
-      expect(() => transpileSync(input, options)).toThrow(SyntaxError)
-      asyncChecks.push(async () => {
-        await expect(transpileAsync(input, options)).rejects.toThrow(SyntaxError)
-      })
-    }
-    throw jsError
-  }
-
-  if (nativeBindingAvailable) {
-    // sync: output + onError reports must match
-    const syncReports: UnsupportedSyntax[] = []
-    const sync = transpileSync(input, {
-      ...options,
-      onError: node => syncReports.push(node),
-    })
-    expect(sync, `sync output for ${JSON.stringify(input.slice(0, 80))}`).toBe(js)
-    expect(syncReports).toEqual(jsReports)
-
-    // async: queued (see afterAll)
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     asyncChecks.push(async () => {
-      const asyncReports: UnsupportedSyntax[] = []
-      const asyncOutput = await transpileAsync(input, {
-        ...options,
-        onError: node => asyncReports.push(node),
-      })
-      expect(
-        asyncOutput,
-        `async output for ${JSON.stringify(input.slice(0, 80))}`,
-      ).toBe(js)
-      expect(asyncReports).toEqual(jsReports)
+      let asyncMessage = ''
+      try {
+        await transpileAsync(input, options)
+      }
+      catch (asyncError) {
+        asyncMessage = asyncError instanceof Error ? asyncError.message : String(asyncError)
+      }
+      expect(asyncMessage, `async rejection for ${JSON.stringify(input.slice(0, 80))}`).toBe(message)
     })
+    throw error
   }
 
-  return js
+  asyncChecks.push(async () => {
+    const asyncReports: UnsupportedSyntax[] = []
+    const asyncOutput = await transpileAsync(input, {
+      ...options,
+      onError: (node) => {
+        asyncReports.push(node)
+      },
+    })
+    expect(
+      asyncOutput,
+      `async output for ${JSON.stringify(input.slice(0, 80))}`,
+    ).toBe(output)
+    expect(asyncReports).toEqual(reports)
+  })
+
+  return output
 }

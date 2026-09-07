@@ -3,12 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bench, describe } from 'vitest'
-import { transpile } from '../src/index'
-import {
-  nativeBindingAvailable,
-  transpileAsync,
-  transpileSync,
-} from '../src/native'
+import { transpile, transpileSync } from '../src/index'
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), '../test/fixture')
 
@@ -52,25 +47,15 @@ const samples: Array<{ name: string, input: string, options?: TranspileOptions }
   },
 ]
 
-describe.runIf(nativeBindingAvailable)('transpile: js vs native', () => {
+describe('transpile', () => {
   for (const { name, input, options } of samples) {
-    // Sanity: the three implementations must agree before timing anything.
-    const expected = transpile(input, options)
-    if (transpileSync(input, options) !== expected) {
-      throw new Error(`native sync output mismatch for ${name}`)
-    }
-
     describe(name, () => {
-      bench('js (oxc-parser + visitor)', () => {
-        transpile(input, options)
-      })
-
-      bench('native transpileSync', () => {
+      bench('transpileSync', () => {
         transpileSync(input, options)
       })
 
-      bench('native transpileAsync', async () => {
-        await transpileAsync(input, options)
+      bench('transpile (async)', async () => {
+        await transpile(input, options)
       })
     })
   }

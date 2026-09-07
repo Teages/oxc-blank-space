@@ -8,3 +8,7 @@ dist
 
 # rust
 native/target
+
+# build staging
+wasm
+binaries
