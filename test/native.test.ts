@@ -9,6 +9,7 @@ import {
   nativeBindingAvailable,
   transpileAsync,
   transpileSync,
+  transpileUtf16Direct,
 } from '../src/native'
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), 'fixture')
@@ -151,15 +152,42 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     ).toThrow(sentinel)
   })
 
-  it('serves raw lone surrogates through the JS implementation', async () => {
+  it('serves raw lone surrogates through the UTF-16 native path', async () => {
     // Raw lone surrogates cannot survive the UTF-8 boundary into Rust, so
-    // inputs containing one fall back to the JS implementation and keep the
-    // character losslessly.
+    // inputs containing one are routed to the UTF-16 entry points, which
+    // round-trip the original code units losslessly.
     const input = `// ${String.fromCharCode(0xD800)}\nlet a = 1;`
     const jsOutput = transpile(input)
     expect(jsOutput).toContain(String.fromCharCode(0xD800))
     expect(transpileSync(input)).toBe(jsOutput)
     expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('matches JS for escaped lone-surrogate enum member keys', async () => {
+    // pure-ASCII source whose decoded member name contains lone surrogates;
+    // JSON.stringify re-escapes them exactly like the JS implementation
+    const input = String.raw`enum E { "\uD800" = 1, "\uDC00" = 2 }`
+    const jsOutput = transpile(input)
+    expect(jsOutput).toContain('\\ud800')
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('preserves raw lone surrogates in strings and comments losslessly', async () => {
+    const cases = [
+      `let s = "${String.fromCharCode(0xD800)}"`,
+      `let s = "${String.fromCharCode(0xD800)}"\n// ${String.fromCharCode(0xDC00)}`,
+      `enum E { A = 1 } // ${String.fromCharCode(0xD83D)}${String.fromCharCode(0xDE00)}`,
+      `// \u{1F600}\nlet a = 1;`,
+    ]
+    for (const input of cases) {
+      const jsOutput = transpile(input)
+      // the direct binding call bypasses the wrapper entirely: this proves
+      // the native path itself is lossless
+      expect(transpileUtf16Direct(input)).toBe(jsOutput)
+      expect(transpileSync(input)).toBe(jsOutput)
+      expect(await transpileAsync(input)).toBe(jsOutput)
+    }
   })
 
   it('formats seeded random doubles identically to JS on both entries', () => {

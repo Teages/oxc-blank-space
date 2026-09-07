@@ -4,7 +4,6 @@ import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { transpile as transpileJs } from '../src/index'
 
 export type { OnError, TranspileOptions, UnsupportedSyntax } from './types'
 
@@ -24,46 +23,72 @@ interface NativeResult {
   unsupported: NativeUnsupported[]
 }
 
+interface NativeUnitsResult {
+  code: Uint16Array
+  unsupported: NativeUnsupported[]
+}
+
 interface NativeBinding {
   transpileAsync: (input: string, options?: NativeOptions) => Promise<NativeResult>
   transpileNativeSync: (input: string, options?: NativeOptions) => NativeResult
+  transpileUtf16Async: (units: Uint16Array, options?: NativeOptions) => Promise<NativeUnitsResult>
+  transpileUtf16Sync: (units: Uint16Array, options?: NativeOptions) => NativeUnitsResult
 }
 const nativeDir = resolve(dirname(fileURLToPath(import.meta.url)), '../dist')
 
 /**
- * Raw lone surrogates cannot survive the UTF-8 boundary into Rust (they turn
- * into U+FFFD), so inputs containing one are served by the JS implementation,
- * which handles them losslessly. Paired surrogates (astral characters) are
+ * Raw lone surrogates cannot survive the UTF-8 boundary into Rust, so inputs
+ * containing one are routed to the UTF-16 entry points, which round-trip the
+ * original code units losslessly. Paired surrogates (astral characters) are
  * unaffected.
  */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
+function toUnits(input: string): Uint16Array {
+  const units = new Uint16Array(input.length)
+  for (let i = 0; i < input.length; i++) {
+    units[i] = input.charCodeAt(i)
+  }
+  return units
+}
+
+function unitsToString(units: Uint16Array): string {
+  let out = ''
+  for (let i = 0; i < units.length; i += 0x8000) {
+    out += String.fromCharCode(...units.subarray(i, i + 0x8000))
+  }
+  return out
+}
+
 /**
  * The napi artifact for the running platform, e.g.
- * `oxc-blank-space-native.darwin-arm64.node` or, on Linux, the glibc/musl
- * variant matched against the runtime. Returns undefined when no matching
- * binary exists — loading a binary for a different platform or libc would
- * fail anyway, just with a confusing dynamic-linking error.
+ * `oxc-blank-space-native.darwin-arm64.node`, `...-linux-x64-gnu.node` (the
+ * libc variant matched against the runtime) or `...-win32-x64-msvc.node`.
+ * Returns undefined when no matching binary exists — loading a binary built
+ * for another platform or libc would fail anyway, just with a confusing
+ * dynamic-linking error.
  */
 function platformBinary(): string | undefined {
   const base = `oxc-blank-space-native.${process.platform}-${process.arch}`
   const binaries = readdirSync(nativeDir).filter(file => file.endsWith('.node')).sort()
-  if (process.platform !== 'linux') {
-    return binaries.includes(`${base}.node`) ? `${base}.node` : undefined
-  }
-  // process.report carries the glibc version only when linked against glibc
-  const header = (
-    process.report as { getReport?: () => { header?: { glibcVersionRuntime?: string } } }
-  )?.getReport?.().header
-  const musl = header?.glibcVersionRuntime === undefined
-  const preferred = musl ? `${base}-musl.node` : `${base}-gnu.node`
-  const other = musl ? `${base}-gnu.node` : `${base}-musl.node`
-  const found = binaries.includes(preferred)
-    ? preferred
-    : binaries.includes(other)
-      ? other
-      : undefined
-  return found
+  const candidates = (() => {
+    switch (process.platform) {
+      case 'linux': {
+        // process.report carries the glibc version only when linked against
+        // glibc; the other libc variant is not a fallback — it cannot load.
+        const report = process.report as
+          | { getReport?: () => { header?: { glibcVersionRuntime?: string } } }
+          | undefined
+        const musl = report?.getReport?.().header?.glibcVersionRuntime === undefined
+        return musl ? [`${base}-musl.node`] : [`${base}-gnu.node`]
+      }
+      case 'win32':
+        return [`${base}-msvc.node`]
+      default:
+        return [`${base}.node`]
+    }
+  })()
+  return candidates.find(name => binaries.includes(name))
 }
 
 /**
@@ -138,7 +163,13 @@ export async function transpileAsync(
   options: TranspileOptions = {},
 ): Promise<string> {
   if (LONE_SURROGATE.test(input)) {
-    return transpileJs(input, options)
+    const result = await requireBinding()
+      .transpileUtf16Async(toUnits(input), toNativeOptions(options))
+      .catch((error: unknown) => {
+        throw new SyntaxError(error instanceof Error ? error.message : String(error))
+      })
+    dispatchReports(result.unsupported, options)
+    return unitsToString(result.code)
   }
   const result = await requireBinding()
     .transpileAsync(input, toNativeOptions(options))
@@ -147,6 +178,17 @@ export async function transpileAsync(
     })
   dispatchReports(result.unsupported, options)
   return result.code
+}
+
+/**
+ * Direct UTF-16 access to the native pipeline: `input` is converted to code
+ * units, handed to the binding, and the result is converted back — no option
+ * handling and no fallback logic in between. Exported for tests and callers
+ * that need to verify the native path itself.
+ */
+export function transpileUtf16Direct(input: string): string {
+  const result = requireBinding().transpileUtf16Sync(toUnits(input))
+  return unitsToString(result.code)
 }
 
 /**
@@ -160,7 +202,17 @@ export function transpileSync(
   options: TranspileOptions = {},
 ): string {
   if (LONE_SURROGATE.test(input)) {
-    return transpileJs(input, options)
+    // Only the binding call is wrapped into a SyntaxError (parse failures);
+    // onError exceptions propagate unchanged, matching transpileAsync.
+    let unitsResult: { code: Uint16Array, unsupported: NativeUnsupported[] }
+    try {
+      unitsResult = requireBinding().transpileUtf16Sync(toUnits(input), toNativeOptions(options))
+    }
+    catch (error) {
+      throw new SyntaxError(error instanceof Error ? error.message : String(error))
+    }
+    dispatchReports(unitsResult.unsupported, options)
+    return unitsToString(unitsResult.code)
   }
   // Only the binding call is wrapped into a SyntaxError (parse failures);
   // exceptions thrown from `options.onError` must propagate unchanged,

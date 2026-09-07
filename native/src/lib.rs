@@ -28,7 +28,7 @@ mod transpile;
 mod trivia;
 mod walk;
 
-use napi::bindgen_prelude::AsyncTask;
+use napi::bindgen_prelude::{AsyncTask, Uint16Array};
 use napi::{Env, Error, Result, Status, Task};
 use napi_derive::napi;
 
@@ -55,6 +55,15 @@ pub struct NativeUnsupported {
 #[napi(object)]
 pub struct TranspileNativeResult {
     pub code: String,
+    pub unsupported: Vec<NativeUnsupported>,
+}
+
+/// UTF-16 variant of [`TranspileNativeResult`]: `code` carries the output as
+/// raw UTF-16 code units, which is the only way to round-trip raw lone
+/// surrogates losslessly (a Rust `String` cannot hold them).
+#[napi(object)]
+pub struct TranspileUnitsResult {
+    pub code: Uint16Array,
     pub unsupported: Vec<NativeUnsupported>,
 }
 
@@ -86,6 +95,24 @@ fn utf16_offset(input: &str, byte_offset: u32) -> u32 {
         .chars()
         .map(|c| c.len_utf16() as u32)
         .sum()
+}
+
+fn to_napi_units_result(
+    output: std::result::Result<transpile::TranspileUnitsOutput, String>,
+) -> Result<TranspileUnitsResult> {
+    let output = output.map_err(|message| Error::new(Status::GenericFailure, message))?;
+    Ok(TranspileUnitsResult {
+        code: Uint16Array::new(output.code),
+        unsupported: output
+            .unsupported
+            .into_iter()
+            .map(|report| NativeUnsupported {
+                node_type: report.node_type.to_string(),
+                start: report.start,
+                end: report.end,
+            })
+            .collect(),
+    })
 }
 
 fn to_napi_result(
@@ -249,3 +276,45 @@ mod perf_bench {
     }
 }
 mod dtoa_probe;
+
+pub struct TranspileUnitsTask {
+    units: Vec<u16>,
+    filename: String,
+}
+
+impl Task for TranspileUnitsTask {
+    type Output = TranspileUnitsResult;
+    type JsValue = TranspileUnitsResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        to_napi_units_result(transpile::transpile_units_caught(&self.units, &self.filename))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+/// UTF-16 entry point: `units` are the input's UTF-16 code units. Raw lone
+/// surrogates — which cannot cross into a Rust `String` — are handled
+/// losslessly here instead of through the lossy `String` conversion, and the
+/// result comes back as code units. Report offsets are UTF-16 code units.
+#[napi(ts_return_type = "Promise<TranspileUnitsResult>")]
+pub fn transpile_utf16_async(
+    units: Uint16Array,
+    options: Option<TranspileNativeOptions>,
+) -> AsyncTask<TranspileUnitsTask> {
+    let filename = resolve_filename(options.as_ref());
+    let units = units.to_vec();
+    AsyncTask::new(TranspileUnitsTask { units, filename })
+}
+
+/// Synchronous UTF-16 entry point (see [`transpile_utf16_async`]).
+#[napi]
+pub fn transpile_utf16_sync(
+    units: Uint16Array,
+    options: Option<TranspileNativeOptions>,
+) -> Result<TranspileUnitsResult> {
+    let filename = resolve_filename(options.as_ref());
+    to_napi_units_result(transpile::transpile_units_caught(&units, &filename))
+}

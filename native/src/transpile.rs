@@ -20,10 +20,17 @@ pub(crate) fn allocator_pool() -> &'static AllocatorPool {
 }
 
 use crate::blanker::UnsupportedSyntax;
-use crate::walk::blank_program;
+use crate::walk::{blank_program, blank_program_utf16};
 
 pub struct TranspileOutput {
     pub code: String,
+    pub unsupported: Vec<UnsupportedSyntax>,
+}
+
+/// Output of the lossless UTF-16 path: code units plus reports whose offsets
+/// are already UTF-16 code units.
+pub struct TranspileUnitsOutput {
+    pub code: Vec<u16>,
     pub unsupported: Vec<UnsupportedSyntax>,
 }
 
@@ -66,6 +73,101 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
 
     let (code, unsupported) = blank_program(&return_value.program, input, &return_value.tokens);
     Ok(TranspileOutput { code, unsupported })
+}
+
+/// Lossless UTF-16 variant of [`transpile`]: `units` are the original JS
+/// string's code units. The parser works on a lossy UTF-8 copy (raw lone
+/// surrogates cannot exist in Rust strings), but every output unit is taken
+/// from the original units — untouched regions verbatim, blanked ranges with
+/// newline-preserving spaces — so raw lone surrogates survive. Report offsets
+/// are UTF-16 code units.
+pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOutput, String> {
+    // Lossy parse copy: valid pairs become the astral character, every other
+    // unit maps to itself when possible and to U+FFFD otherwise. The copy's
+    // byte length per unit is tracked so spans can be mapped back.
+    let mut copy: Vec<u8> = Vec::with_capacity(units.len() * 3);
+    let mut byte_to_unit: Vec<u32> = Vec::with_capacity(units.len() + 1);
+    let mut index = 0usize;
+    while index < units.len() {
+        byte_to_unit.push(copy.len() as u32);
+        let unit = units[index];
+        let is_high = (0xD800..0xDC00).contains(&unit);
+        let next_low = matches!(units.get(index + 1), Some(next) if (0xDC00..0xE000).contains(next));
+        let mut buf = [0u8; 4];
+        if is_high && next_low {
+            let code = 0x10000 + (((unit - 0xD800) as u32) << 10) + (units[index + 1] - 0xDC00) as u32;
+            copy.extend_from_slice(char::from_u32(code).expect("valid pair").encode_utf8(&mut buf).as_bytes());
+            index += 2;
+        } else if unit == 0x0A || unit == 0x0D {
+            copy.push(unit as u8);
+            index += 1;
+        } else {
+            let c = char::from_u32(unit as u32).unwrap_or('\u{FFFD}');
+            copy.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            index += 1;
+        }
+    }
+    byte_to_unit.push(copy.len() as u32);
+    let parse_copy = String::from_utf8(copy).expect("lossy copy is valid UTF-8");
+
+    let allocator_guard = allocator_pool().get();
+    let allocator: &Allocator = &allocator_guard;
+    let source_type = SourceType::from_path(filename)
+        .unwrap_or_else(|_| SourceType::ts())
+        .with_module(true);
+    let return_value = Parser::new(allocator, &parse_copy, source_type)
+        .with_config(TokensParserConfig)
+        .parse();
+
+    if return_value.program.body.is_empty()
+        && return_value.program.directives.is_empty()
+        && return_value.diagnostics.has_errors()
+    {
+        let details = return_value
+            .diagnostics
+            .iter()
+            .map(|d| d.message.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(format!("failed to parse {filename}:\n{details}"));
+    }
+
+    let (code_units, unsupported) = blank_program_utf16(
+        &return_value.program,
+        units,
+        &parse_copy,
+        &byte_to_unit,
+        &return_value.tokens[..],
+    );
+
+    let unit_at = |pos: u32| byte_to_unit.partition_point(|&b| b < pos) as u32;
+    let unsupported = unsupported
+        .into_iter()
+        .map(|report| UnsupportedSyntax {
+            start: unit_at(report.start),
+            end: unit_at(report.end),
+            ..report
+        })
+        .collect();
+
+    Ok(TranspileUnitsOutput { code: code_units, unsupported })
+}
+
+/// [`transpile_units`] with panic containment (see [`transpile_caught`]).
+pub fn transpile_units_caught(
+    units: &[u16],
+    filename: &str,
+) -> Result<TranspileUnitsOutput, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile_units(units, filename)))
+        .unwrap_or_else(|payload| {
+            let detail = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
+                .unwrap_or_else(|| "panic".to_string());
+            Err(format!("internal error: {detail}"))
+        })
+        .and_then(Ok)
 }
 
 /// [`transpile`] with panic containment: a bug in an untested AST corner must

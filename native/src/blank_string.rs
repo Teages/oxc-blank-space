@@ -154,3 +154,79 @@ mod tests {
         assert_eq!(bs.build("abc"), "abc");
     }
 }
+
+impl BlankString {
+    /// UTF-16 variant of [`build`](Self::build) for the lossless UTF-16 path:
+    /// the input is the original code units, `byte_to_unit` maps every parse
+    /// copy byte offset to its unit index (strictly increasing), and the
+    /// result is the output in code units. Blanked ranges preserve newline
+    /// units and replace every other unit (including lone surrogates) with a
+    /// single space — matching the JS implementation's per-code-unit blanking.
+    pub fn build_units(
+        &self,
+        units: &[u16],
+        byte_to_unit: &[u32],
+    ) -> Vec<u16> {
+        if self.ranges.is_empty() {
+            return units.to_vec();
+        }
+        let unit_at = |pos: u32| byte_to_unit.partition_point(|&b| b < pos);
+
+        let mut extra = 0usize;
+        for &(flags, start, end, text_index) in &self.ranges {
+            if flags == REPLACE_WITH_TEXT {
+                let len = self.texts[text_index as usize].encode_utf16().count();
+                let u0 = unit_at(start);
+                let u1 = unit_at(end);
+                extra += len.saturating_sub(u1 - u0);
+            }
+        }
+
+        let mut out: Vec<u16> = Vec::with_capacity(units.len() + extra);
+        let mut previous_end = 0u32;
+        let mut previous_unit = 0usize;
+
+        for &(flags, start, end, text_index) in &self.ranges {
+            let range_start = start.max(previous_end);
+            let range_unit = unit_at(range_start);
+            out.extend_from_slice(&units[previous_unit as usize..range_unit]);
+
+            let mut range_unit = range_unit;
+            match flags {
+                REPLACE_WITH_TEXT => {
+                    for unit in self.texts[text_index as usize].encode_utf16() {
+                        out.push(unit);
+                    }
+                }
+                REPLACE_WITH_CLOSE_PAREN => {
+                    out.push(0x29);
+                    range_unit += 1;
+                }
+                REPLACE_WITH_SEMI => {
+                    out.push(0x3B);
+                    range_unit += 1;
+                }
+                REPLACE_WITH_OPEN_PAREN => {
+                    out.push(0x28);
+                    range_unit += 1;
+                }
+                _ => {}
+            }
+
+            previous_end = end;
+            if flags != REPLACE_WITH_TEXT {
+                let end_unit = unit_at(previous_end);
+                for &unit in &units[range_unit as usize..end_unit as usize] {
+                    out.push(match unit {
+                        0x0A | 0x0D => unit,
+                        _ => 0x20,
+                    });
+                }
+            }
+            previous_unit = unit_at(previous_end);
+        }
+
+        out.extend_from_slice(&units[previous_unit as usize..]);
+        out
+    }
+}

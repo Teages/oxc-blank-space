@@ -60,7 +60,7 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     for member in &node.body.members {
         let member_span = member.span();
         let member_name = member_name_of(w, member);
-        let key = json_quote(&member_name);
+        let key = member_key(w, member);
         let initializer = member.initializer.as_ref();
         let constant = initializer
             .and_then(|init| eval_constant(init, &constants, &member_name));
@@ -136,6 +136,8 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     );
 }
 
+/// Unquoted member name, used for the constants map and sibling-reference
+/// qualification. Mirrors the JS `memberNameOf` (decoded `String(id.value)`).
 fn member_name_of(w: &Walker<'_>, member: &TSEnumMember<'_>) -> String {
     match &member.id {
         TSEnumMemberName::Identifier(id) => id.name.as_str().to_string(),
@@ -147,6 +149,199 @@ fn member_name_of(w: &Walker<'_>, member: &TSEnumMember<'_>) -> String {
             w.src[template.span().start as usize..template.span().end as usize].to_string()
         }
     }
+}
+
+/// The quoted enum property key: `JSON.stringify(memberName)` in the JS
+/// implementation. The member name is decoded from the raw literal source (not
+/// the AST's lossy `value` string, which replaces lone-surrogate escapes with
+/// U+FFFD) as UTF-16 code units, so escaped lone surrogates (`"\uD800"`) are
+/// re-emitted exactly like `JSON.stringify` does — lowercase `\udXXXX`.
+fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
+    match &member.id {
+        TSEnumMemberName::Identifier(id) => json_quote(id.name.as_str()),
+        TSEnumMemberName::String(literal) | TSEnumMemberName::ComputedString(literal) => {
+            let span = literal.span;
+            let inner_start = span.start + 1;
+            let inner_end = span.end - 1;
+            let units: Vec<u16> = match (&w.units, &w.byte_to_unit) {
+                (Some(units), Some(byte_to_unit)) => {
+                    // UTF-16 path: decode from the original code units, which
+                    // preserve raw lone surrogates losslessly.
+                    let u0 = unit_at(byte_to_unit, inner_start);
+                    let u1 = unit_at(byte_to_unit, inner_end);
+                    decode_units(&units[u0 as usize..u1 as usize])
+                }
+                _ => {
+                    let units: Vec<u16> = w.src[inner_start as usize..inner_end as usize]
+                        .chars()
+                        .flat_map(|c| {
+                            let mut buf = [0u16; 2];
+                            let encoded = c.encode_utf16(&mut buf);
+                            encoded.iter().copied().collect::<Vec<u16>>()
+                        })
+                        .collect();
+                    decode_units(&units)
+                }
+            };
+            json_quote_utf16(&units)
+        }
+        TSEnumMemberName::ComputedTemplateString(template) => {
+            // JS: memberNameOf returns the raw span text, JSON.stringify quotes it
+            json_quote(&w.src[template.span().start as usize..template.span().end as usize])
+        }
+    }
+}
+
+/// Decode JS string-literal escape sequences over UTF-16 code units. Lone
+/// surrogates (from `\uD800`-style escapes or raw units on the UTF-16 path)
+/// are preserved as individual units.
+fn decode_units(units: &[u16]) -> Vec<u16> {
+    let mut out = Vec::with_capacity(units.len());
+    let mut i = 0usize;
+    while i < units.len() {
+        let unit = units[i];
+        if unit != 0x5C {
+            out.push(unit);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let Some(&escape) = units.get(i) else {
+            out.push(0x5C);
+            break;
+        };
+        i += 1;
+        match escape {
+            0x0A | 0x0D | 0x2028 | 0x2029 => {} // line continuation
+            0x62 => out.push(0x08),
+            0x74 => out.push(0x09),
+            0x6E => out.push(0x0A),
+            0x76 => out.push(0x0B),
+            0x66 => out.push(0x0C),
+            0x72 => out.push(0x0D),
+            0x78 => {
+                let value = hex_value(units, i, 2);
+                if let Some((value, consumed)) = value {
+                    out.push(value as u16);
+                    i += consumed;
+                } else {
+                    out.push(0x78);
+                }
+            }
+            0x75 => {
+                if units.get(i) == Some(&0x7B) {
+                    // \u{HexDigits}
+                    let mut j = i + 1;
+                    let mut value: u32 = 0;
+                    while let Some(&digit) = units.get(j) {
+                        let d = hex_digit(digit);
+                        match d {
+                            Some(d) if value <= 0x10FFFF => value = value * 16 + d as u32,
+                            _ => break,
+                        }
+                        j += 1;
+                    }
+                    if units.get(j) == Some(&0x7D)
+                        && value <= 0x10FFFF
+                        && !(0xD800..=0xDFFF).contains(&value)
+                    {
+                        let mut buf = [0u16; 2];
+                        let encoded = char::from_u32(value).unwrap().encode_utf16(&mut buf);
+                        out.extend(encoded.iter().copied());
+                        i = j + 1;
+                    } else {
+                        out.push(0x75);
+                    }
+                } else {
+                    let value = hex_value(units, i, 4);
+                    if let Some((value, consumed)) = value {
+                        out.push(value as u16);
+                        i += consumed;
+                    } else {
+                        out.push(0x75);
+                    }
+                }
+            }
+            0x30..=0x37 => {
+                // legacy octal escape: up to 3 digits total
+                let mut value = (escape - 0x30) as u16;
+                let mut count = 1usize;
+                while count < 3
+                    && let Some(&digit) = units.get(i)
+                    && (0x30..=0x37).contains(&digit)
+                {
+                    value = value * 8 + (digit - 0x30) as u16;
+                    i += 1;
+                    count += 1;
+                }
+                out.push(value);
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn hex_digit(unit: u16) -> Option<u16> {
+    match unit {
+        0x30..=0x39 => Some(unit - 0x30),
+        0x41..=0x46 => Some(unit - 0x37),
+        0x61..=0x66 => Some(unit - 0x57),
+        _ => None,
+    }
+}
+
+fn hex_value(units: &[u16], start: usize, count: usize) -> Option<(u32, usize)> {
+    let mut value: u32 = 0;
+    for offset in 0..count {
+        let digit = hex_digit(*units.get(start + offset)?)?;
+        value = value * 16 + digit as u32;
+    }
+    Some((value, count))
+}
+
+/// `JSON.stringify` over UTF-16 code units: well-formed output — lone
+/// surrogates are escaped as lowercase `\udXXX`, surrogate pairs become the
+/// astral character, controls use the short forms.
+fn json_quote_utf16(units: &[u16]) -> String {
+    let mut out = String::from("\"");
+    let mut i = 0usize;
+    while i < units.len() {
+        let unit = units[i];
+        match unit {
+            0x22 => out.push_str("\\\""),
+            0x5C => out.push_str("\\\\"),
+            0x08 => out.push_str("\\b"),
+            0x09 => out.push_str("\\t"),
+            0x0A => out.push_str("\\n"),
+            0x0C => out.push_str("\\f"),
+            0x0D => out.push_str("\\r"),
+            0x00..=0x1F => out.push_str(&format!("\\u{:04x}", unit)),
+            0xD800..=0xDBFF => {
+                let next = units.get(i + 1).copied();
+                if matches!(next, Some(low) if (0xDC00..=0xDFFF).contains(&low)) {
+                    let code = 0x10000
+                        + (((unit - 0xD800) as u32) << 10)
+                        + (next.unwrap() - 0xDC00) as u32;
+                    out.push(char::from_u32(code).expect("valid astral char"));
+                    i += 1;
+                } else {
+                    out.push_str(&format!("\\u{:04x}", unit));
+                }
+            }
+            0xDC00..=0xDFFF => out.push_str(&format!("\\u{:04x}", unit)),
+            _ => out.push(char::from_u32(unit as u32).expect("BMP char")),
+        }
+        i += 1;
+    }
+    out.push('"');
+    out
+}
+
+/// Unit index of the unit starting at byte offset `pos` (byte-to-unit maps
+/// are strictly increasing).
+pub(crate) fn unit_at(byte_to_unit: &[u32], pos: u32) -> u32 {
+    byte_to_unit.partition_point(|&b| b < pos) as u32
 }
 
 /// `JSON.stringify` of a JS string, used for the quoted member key text.
@@ -209,7 +404,7 @@ fn js_number_to_string(value: f64) -> String {
     let d = exponent - (digits.len() as i32 - 1);
 
     // round half to even (ECMAScript) instead of half away from zero
-    if digits_int % 2 == 1 && is_exact_tie(magnitude, digits_int, d) {
+    if digits_int % 2 == 1 && is_exact_tie(magnitude, d) {
         digits_int = tie_partner(magnitude, digits_int, d);
     }
 
@@ -268,7 +463,7 @@ fn layout_digits(digits_int: u64, d: i32) -> String {
 /// tie condition collapses the power of two to zero); comparing that odd
 /// integer with 2 x digits picks the direction.
 fn tie_partner(v: f64, digits: u64, d: i32) -> u64 {
-    let (m, e) = odd_decomposition(v);
+    let (m, _) = odd_decomposition(v);
     let scaled_times_two: u128 = if d <= 0 {
         let mut pow5: u128 = 1;
         let cap: u128 = 2 * digits as u128 + 1;
@@ -311,7 +506,7 @@ fn odd_decomposition(v: f64) -> (u64, i32) {
 /// (digits - 1) x 10^d and (digits + 1) x 10^d, i.e. whether
 /// |v| x 2 x 10^d is an odd integer (then the two neighbors are equally
 /// close). Requires `digits` to be the shortest round-trip digits of `|v|`.
-fn is_exact_tie(v: f64, digits: u64, d: i32) -> bool {
+fn is_exact_tie(v: f64, d: i32) -> bool {
     let (m, e) = odd_decomposition(v);
     // |v| x 2 x 10^(-d) = m x 2^(e + 1 - d) x 5^(-d) — an odd integer
     // requires the power of two to vanish, an odd mantissa, and no 5s in the
@@ -472,10 +667,11 @@ fn qualify_index(
         _ => {
             for child in w.children_of(idx).collect::<Vec<_>>() {
                 qualify_index(w, child, enum_name, member_names);
-            }
+        }
         }
     }
 }
+
 
 fn qualify_expr(
     w: &mut Walker<'_>,
@@ -486,6 +682,7 @@ fn qualify_expr(
     let start = AstKind::from_expression(expr).node_id().index() as u32;
     qualify_index(w, start, enum_name, member_names);
 }
+
 
 #[cfg(test)]
 mod tests {

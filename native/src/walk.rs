@@ -67,6 +67,10 @@ impl<'a> Visit<'a> for Flattener<'a> {
 pub struct Walker<'a> {
     pub src: &'a str,
     pub blanker: Blanker<'a>,
+    /// Original UTF-16 code units and their byte map when transpiling the
+    /// lossless UTF-16 path (None on the regular String path).
+    pub(crate) units: Option<&'a [u16]>,
+    pub(crate) byte_to_unit: Option<&'a [u32]>,
     nodes: Vec<AstKind<'a>>,
     first_child: Vec<u32>,
     next_sibling: Vec<u32>,
@@ -109,6 +113,8 @@ pub fn blank_program<'a>(
     let mut walker = Walker {
         src,
         blanker: Blanker::new(src, tokens),
+        units: None,
+        byte_to_unit: None,
         nodes: flattener.nodes,
         first_child: flattener.first_child,
         next_sibling: flattener.next_sibling,
@@ -128,6 +134,45 @@ pub fn blank_program<'a>(
     walker.visit_node_array(&indices, true, false);
 
     let output = walker.blanker.output.build(src);
+    (output, take(&mut walker.blanker.reports))
+}
+
+/// UTF-16 variant of [`blank_program`] for the lossless path: `units` is the
+/// original input, `parse_copy` the lossy UTF-8 copy handed to the parser, and
+/// `byte_to_unit` maps every copy byte offset to its unit index. The output is
+/// the blanked source in code units — raw lone surrogates survive untouched.
+pub fn blank_program_utf16<'a>(
+    program: &'a Program<'a>,
+    units: &'a [u16],
+    parse_copy: &'a str,
+    byte_to_unit: &'a [u32],
+    tokens: &'a [Token],
+) -> (Vec<u16>, Vec<UnsupportedSyntax>) {
+    let mut flattener = Flattener::default();
+    flattener.visit_program(program);
+
+    let mut walker = Walker {
+        src: parse_copy,
+        blanker: Blanker::new(parse_copy, tokens),
+        units: Some(units),
+        byte_to_unit: Some(byte_to_unit),
+        nodes: flattener.nodes,
+        first_child: flattener.first_child,
+        next_sibling: flattener.next_sibling,
+        scratch_pool: Vec::new(),
+        parent_statement: None,
+    };
+
+    let mut indices = Vec::with_capacity(program.directives.len() + program.body.len());
+    for directive in &program.directives {
+        indices.push(node_index!(directive));
+    }
+    for stmt in &program.body {
+        indices.push(statement_index(stmt));
+    }
+    walker.visit_node_array(&indices, true, false);
+
+    let output = walker.blanker.output.build_units(units, byte_to_unit);
     (output, take(&mut walker.blanker.reports))
 }
 
