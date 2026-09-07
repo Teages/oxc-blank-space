@@ -104,23 +104,35 @@ the fixture corpus and inline cases.
 
 ### Known divergences from the JS implementation
 
-- **Raw lone surrogates** in the input cannot survive the UTF-8 boundary:
-  napi replaces them with U+FFFD where the JS implementation passes the
-  character through. Every other astral character is handled exactly. This is
-  inherent to a Rust implementation (Rust strings cannot hold lone
-  surrogates) and pinned by a test.
+- **Raw lone surrogates** cannot survive the UTF-8 boundary into Rust, so
+  inputs containing one are routed to dedicated UTF-16 entry points
+  (`transpileUtf16Async`/`transpileUtf16Sync`): the parser sees a lossy copy
+  while the output is assembled from the original code units, preserving raw
+  lone surrogates losslessly.
+- **Raw lone surrogates as enum member names**: the JS entry's output key is
+  lossy (U+FFFD — a consequence of oxc-parser's Rust-side string transfer),
+  while the native entries re-escape it as `\udXXX`. The native behavior is
+  intentional: it keeps the transpiled program's property access working,
+  matching the original source's runtime semantics. This is the one input
+  class where the native output intentionally differs from the JS
+  implementation.
 - **Parse-error messages** carry the raw diagnostics rather than the JS
   entry's codeframe rendering; the error type (`SyntaxError`) and the
   "failed to parse <filename>" prefix match.
-- **Distribution**: releases currently ship a single binary; the loader
-  prefers the artifact matching `process.platform`/`process.arch` and falls
-  back to whatever is present. Shipping per-platform packages (napi optional
-  dependencies + a build matrix in the release workflow) is the remaining
-  step before making a native entry the default export.
+- **Distribution**: the loader matches the artifact by
+  `process.platform`/`process.arch` and, on Linux, glibc vs musl (strict — a
+  wrong-libc binary is never loaded), and on Windows expects the `-msvc`
+  artifact. The release workflow still builds a single platform; publishing
+  per-platform packages (napi optional dependencies + a build matrix in the
+  release workflow) is the remaining step before making a native entry the
+  default export.
 
 With those caveats, the behavior suites (`test/*.test.ts`) run every test
 against both native entries in addition to the JS implementation, so the
-three implementations stay byte-for-byte identical on every covered input.
+implementations stay byte-for-byte identical on every covered input —
+including 100k seeded random doubles exercised through enum expansion
+(number formatting implements the ECMAScript round-half-to-even rules
+exactly). CI enforces native availability with `NATIVE_REQUIRED=1`.
 
 ## Benchmark
 

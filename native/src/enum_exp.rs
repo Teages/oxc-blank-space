@@ -274,10 +274,13 @@ fn decode_units(units: &[u16]) -> Vec<u16> {
                 }
             }
             0x30..=0x37 => {
-                // legacy octal escape: up to 3 digits total
-                let mut value = escape - 0x30;
+                // Annex B legacy octal: digits starting 0-3 consume up to two
+                // more octal digits, digits starting 4-7 up to one
+                let first = escape - 0x30;
+                let max_extra = if first <= 3 { 2 } else { 1 };
+                let mut value = first;
                 let mut count = 1usize;
-                while count < 3
+                while count <= max_extra
                     && let Some(&digit) = units.get(i)
                     && (0x30..=0x37).contains(&digit)
                 {

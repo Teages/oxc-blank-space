@@ -255,6 +255,32 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     expect(await transpileAsync(input)).toBe(jsOutput)
   })
 
+  it('decodes legacy octal escapes in enum keys per Annex B', async () => {
+    const input = 'enum E { "\\400" = 1, "\\777" = 2 }'
+    const jsOutput = transpile(input)
+    expect(jsOutput).toContain('" 0"')
+    expect(jsOutput).toContain('"?7"')
+    expect(transpileSync(input)).toBe(jsOutput)
+    expect(await transpileAsync(input)).toBe(jsOutput)
+  })
+
+  it('keeps raw lone-surrogate enum keys runtime-faithful (intentional divergence)', async () => {
+    // The JS entry's key is lossy (U+FFFD) because oxc-parser's Rust-side
+    // string value cannot hold the surrogate. The native UTF-16 path
+    // re-escapes it as \ud800 — runtime property access on the transpiled
+    // output keeps resolving the original member, matching ts-blank-space's
+    // semantics. Pinned here as an intentional improvement.
+    const input = `enum E { "${String.fromCharCode(0xD800)}" = 1 }`
+    const jsOutput = transpile(input)
+    expect(jsOutput).toContain('\uFFFD')
+
+    const syncOutput = transpileSync(input)
+    expect(syncOutput).toContain('\\ud800')
+    expect(syncOutput).not.toContain('\uFFFD')
+    const asyncOutput = await transpileAsync(input)
+    expect(asyncOutput).toBe(syncOutput)
+  })
+
   it('formats seeded random doubles identically to JS on both entries', () => {
     // deterministic xorshift-style PRNG over raw f64 bit patterns, plus the
     // structured edge values (known ties, extremes, subnormals)
