@@ -1,5 +1,3 @@
-//! Port of `src/core/blank-string.ts`.
-
 const REPLACE_WITH_BLANK: u8 = 0;
 const REPLACE_WITH_OPEN_PAREN: u8 = 1;
 const REPLACE_WITH_CLOSE_PAREN: u8 = 2;
@@ -23,18 +21,17 @@ pub struct BlankString {
 impl BlankString {
     /// Replace [start, end) with `text`; `end` may equal `start` to insert.
     pub fn override_range(&mut self, start: u32, end: u32, text: impl AsRef<str>) {
-        self.override_range_units(start, end, "", &text.as_ref().encode_utf16().collect::<Vec<u16>>());
+        self.override_range_units(
+            start,
+            end,
+            "",
+            &text.as_ref().encode_utf16().collect::<Vec<u16>>(),
+        );
     }
 
     /// [`override_range`](Self::override_range) with the replacement given as
     /// UTF-16 units — required when the text contains raw lone surrogates.
-    pub fn override_range_units(
-        &mut self,
-        start: u32,
-        end: u32,
-        prefix: &str,
-        units: &[u16],
-    ) {
+    pub fn override_range_units(&mut self, start: u32, end: u32, prefix: &str, units: &[u16]) {
         let index = self.texts.len() as u32;
         let mut text: Vec<u16> = prefix.encode_utf16().collect();
         text.extend_from_slice(units);
@@ -43,11 +40,13 @@ impl BlankString {
     }
 
     pub fn blank_but_start_with_open_paren(&mut self, start: u32, end: u32) {
-        self.ranges.push((REPLACE_WITH_OPEN_PAREN, start, end, u32::MAX));
+        self.ranges
+            .push((REPLACE_WITH_OPEN_PAREN, start, end, u32::MAX));
     }
 
     pub fn blank_but_end_with_close_paren(&mut self, start: u32, end: u32) {
-        self.ranges.push((REPLACE_WITH_BLANK, start, end - 1, u32::MAX));
+        self.ranges
+            .push((REPLACE_WITH_BLANK, start, end - 1, u32::MAX));
         self.ranges
             .push((REPLACE_WITH_CLOSE_PAREN, end - 1, end, u32::MAX));
     }
@@ -114,28 +113,22 @@ impl BlankString {
         }
 
         out.extend_from_slice(&input.as_bytes()[previous_end as usize..]);
-        // ranges only ever contain the input, spaces, and caller-provided text
-        // (all UTF-8), so the buffer is valid UTF-8 by construction.
-        // SAFETY-free variant: String::from_utf8 checked in debug builds.
+        // the buffer only ever holds input bytes, spaces, and caller text
         String::from_utf8(out).expect("output buffer is valid UTF-8")
     }
 }
 
 /// Preserve every newline inside [start, end) and replace everything else with
-/// spaces, one per UTF-16 code unit (matching the JS implementation, which
-/// blanks one space per `charCodeAt` unit — a non-BMP char becomes 2 spaces).
+/// one space per UTF-16 code unit (a non-BMP char becomes 2 spaces).
 ///
 /// Ranges pushed out of source order (a blank nested inside an already-blanked
-/// region) write nothing here, matching the JS loop which never enters its
-/// body when `start >= end`.
+/// region) write nothing.
 fn write_space(out: &mut Vec<u8>, input: &str, start: u32, end: u32) {
     if start >= end {
         return;
     }
     let bytes = &input.as_bytes()[start as usize..end as usize];
     if bytes.is_ascii() {
-        // Fast path: an ASCII byte maps to itself for newlines and to one
-        // space for everything else.
         for &b in bytes {
             out.push(if b == b'\n' || b == b'\r' { b } else { b' ' });
         }
@@ -160,12 +153,8 @@ impl BlankString {
     /// copy byte offset to its unit index (strictly increasing), and the
     /// result is the output in code units. Blanked ranges preserve newline
     /// units and replace every other unit (including lone surrogates) with a
-    /// single space — matching the JS implementation's per-code-unit blanking.
-    pub fn build_units(
-        &self,
-        units: &[u16],
-        byte_to_unit: &[u32],
-    ) -> Vec<u16> {
+    /// single space.
+    pub fn build_units(&self, units: &[u16], byte_to_unit: &[u32]) -> Vec<u16> {
         if self.ranges.is_empty() {
             return units.to_vec();
         }

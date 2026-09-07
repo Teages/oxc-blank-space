@@ -1,16 +1,13 @@
-//! Port of `src/visitor/namespace.ts`.
-//!
 //! TypeScript's `NodeFlags.Namespace` is only set for the `namespace` keyword:
 //! `module Foo {}` (identifier name) is never erased, only `namespace`-declared
 //! modules without runtime values are, and `module`/`declare module` with a
-//! string name is ambient. The native AST splits the estree
-//! `TSModuleDeclaration` into three shapes, all reported under the estree
-//! `TSModuleDeclaration` name.
+//! string name is ambient. The native AST splits the module declaration into
+//! three shapes, all reported under the `TSModuleDeclaration` name.
 
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 
-use crate::walk::{VisitResult, Walker};
+use super::walk::{VisitResult, Walker};
 
 pub(crate) enum Module<'a> {
     Namespace(&'a TSNamespaceDeclaration<'a>),
@@ -72,8 +69,7 @@ fn statement_has_value(statement: &Statement<'_>) -> bool {
                 declaration => declaration_has_value(declaration),
             },
             // `export { a }`, re-exports, `export default`, `export *` all
-            // keep runtime behavior (estree's ExportNamedDeclaration without
-            // a declaration returns true).
+            // keep runtime behavior.
             _ => true,
         };
     }
@@ -92,8 +88,7 @@ fn declaration_has_value(declaration: &Declaration<'_>) -> bool {
             namespace_has_values(statement)
         }
         // `module "..."` with a string name and `declare global` have ambient
-        // (value-less) bodies but mirror the JS rules: kind global / literal id
-        // are treated as having values.
+        // (value-less) bodies but are treated as having values.
         Declaration::TSExternalModuleDeclaration(_) | Declaration::TSGlobalDeclaration(_) => true,
         _ => true,
     }

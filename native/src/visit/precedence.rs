@@ -1,5 +1,3 @@
-//! Port of `src/core/precedence.ts`.
-
 use oxc_syntax::operator::LogicalOperator;
 
 /// JavaScript requires explicit parentheses when mixing `??` with `||`/`&&`.

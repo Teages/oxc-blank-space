@@ -1,10 +1,8 @@
-//! Port of `src/visitor/statement.ts`.
-
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 
-use crate::{class, enum_exp, function, namespace};
-use crate::walk::{VisitResult, Walker};
+use super::walk::{VisitResult, Walker};
+use super::{class, enum_exp, function, namespace};
 
 pub(crate) fn visit_import_declaration<'a>(
     w: &mut Walker<'a>,
@@ -25,9 +23,8 @@ pub(crate) fn visit_import_declaration<'a>(
     VisitResult::Js
 }
 
-/// Specifier-only export declarations (`export { a }` and
-/// `export { a } from 'mod'` — the native AST splits the estree
-/// `ExportNamedDeclaration` into two shapes, both handled here).
+/// Specifier-only export declarations: `export { a }` and
+/// `export { a } from 'mod'` are distinct shapes in the native AST.
 pub(crate) fn visit_export_specifiers(
     w: &mut Walker<'_>,
     span: Span,
@@ -48,9 +45,7 @@ pub(crate) fn visit_export_specifiers(
     VisitResult::Js
 }
 
-/// `export <declaration>` (native `ExportDeclaration`). Declarations wrapped in
-/// `export` that get fully erased must take the whole statement with them —
-/// erasing only the declaration would strand the `export` keyword.
+/// `export <declaration>` (native `ExportDeclaration`).
 pub(crate) fn visit_exported_declaration<'a>(
     w: &mut Walker<'a>,
     node: &'a ExportDeclaration<'a>,
@@ -78,13 +73,9 @@ pub(crate) fn visit_exported_declaration<'a>(
             }
         }
         Declaration::FunctionDeclaration(declaration) => {
-            if declaration.r#type == FunctionType::TSDeclareFunction {
-                // An exported overload signature must take the whole `export`
-                // statement with it — erasing only the declaration would strand
-                // the keyword.
-                w.blanker.blank_statement(wrapper);
-                VisitResult::Blanked
-            } else if declaration.declare {
+            // overload signatures and ambient functions erase the whole
+            // `export` statement — the keyword would otherwise be stranded
+            if declaration.r#type == FunctionType::TSDeclareFunction || declaration.declare {
                 w.blanker.blank_statement(wrapper);
                 VisitResult::Blanked
             } else {
@@ -110,7 +101,8 @@ pub(crate) fn visit_exported_declaration<'a>(
             visit_exported_module(w, wrapper, namespace::Module::Global(declaration))
         }
         Declaration::TSImportEqualsDeclaration(declaration) => {
-            w.blanker.report("TSImportEqualsDeclaration", declaration.span());
+            w.blanker
+                .report("TSImportEqualsDeclaration", declaration.span());
             VisitResult::Js
         }
     }

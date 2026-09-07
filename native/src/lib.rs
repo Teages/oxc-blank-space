@@ -1,32 +1,22 @@
 //! Native Rust implementation of `@teages/oxc-blank-space`.
 //!
-//! Exposes the async entry point used by
-//! `@teages/oxc-blank-space/experimental-native`: parsing and blanking run on
-//! a background thread (napi `AsyncTask`) and resolve with the output plus the
-//! list of unsupported constructs. A synchronous variant is also exposed for
-//! benchmarking the raw Rust speed without the thread-pool hop.
+//! Exposes the napi bindings used by the package's main and browser entries:
+//! parsing and blanking run on a background thread (napi `AsyncTask`) and
+//! resolve with the output plus the list of unsupported constructs. The
+//! synchronous and UTF-16 variants exist for the calling-thread and
+//! lossless-surrogate paths.
 
 /// Flat index of a concrete AST node; assigned during the flatten pass in
-/// `walk::blank_program` (visible crate-wide, must stay above the `mod` items).
+/// `visit::walk::blank_program` (visible crate-wide, must stay above the `mod` items).
 macro_rules! node_index {
     ($n:expr) => {
         $n.node_id.get().index() as u32
     };
 }
 
-mod blank_string;
-mod blanker;
-mod class;
-mod enum_exp;
-mod expression;
-mod function;
-mod namespace;
-mod pattern;
-mod precedence;
-mod statement;
+mod blank;
 mod transpile;
-mod trivia;
-mod walk;
+mod visit;
 
 use napi::bindgen_prelude::{AsyncTask, Uint16Array};
 use napi::{Env, Error, Result, Status, Task};
@@ -69,15 +59,13 @@ pub struct TranspileUnitsResult {
 
 fn resolve_filename(options: Option<&TranspileNativeOptions>) -> String {
     let lang = options.and_then(|o| o.lang.as_deref());
-    options
-        .and_then(|o| o.filename.clone())
-        .unwrap_or_else(|| {
-            if lang == Some("tsx") {
-                "input.tsx".to_string()
-            } else {
-                "input.ts".to_string()
-            }
-        })
+    options.and_then(|o| o.filename.clone()).unwrap_or_else(|| {
+        if lang == Some("tsx") {
+            "input.tsx".to_string()
+        } else {
+            "input.ts".to_string()
+        }
+    })
 }
 
 /// The API contract (`types.ts`) promises character offsets — JS string
@@ -91,10 +79,7 @@ fn utf16_offset(input: &str, byte_offset: u32) -> u32 {
     while offset > 0 && !input.is_char_boundary(offset) {
         offset -= 1;
     }
-    input[..offset]
-        .chars()
-        .map(|c| c.len_utf16() as u32)
-        .sum()
+    input[..offset].chars().map(|c| c.len_utf16() as u32).sum()
 }
 
 fn to_napi_units_result(
@@ -216,7 +201,9 @@ mod perf_bench {
         let source_type = SourceType::from_path("input.ts").unwrap().with_module(true);
         let parser = Parser::new(allocator, input, source_type);
         let ret = if tokens {
-            parser.with_config(oxc_parser::config::TokensParserConfig).parse()
+            parser
+                .with_config(oxc_parser::config::TokensParserConfig)
+                .parse()
         } else {
             parser.parse()
         };
@@ -255,18 +242,23 @@ mod perf_bench {
         let pool = allocator_pool();
         let (p_min, p_mean) = time_it(iters, || parse_only(pool, &corpus, false));
         let (pt_min, pt_mean) = time_it(iters, || parse_only(pool, &corpus, true));
-        let (t_min, t_mean) = time_it(iters, || { transpile_for_bench(&corpus); });
+        let (t_min, t_mean) = time_it(iters, || {
+            transpile_for_bench(&corpus);
+        });
         println!(
             "parse-only      min={:>5}us mean={:>5}us",
-            p_min / 1000, p_mean / 1000
+            p_min / 1000,
+            p_mean / 1000
         );
         println!(
             "parse+tokens    min={:>5}us mean={:>5}us",
-            pt_min / 1000, pt_mean / 1000
+            pt_min / 1000,
+            pt_mean / 1000
         );
         println!(
             "full transpile  min={:>5}us mean={:>5}us",
-            t_min / 1000, t_mean / 1000
+            t_min / 1000,
+            t_mean / 1000
         );
     }
 
@@ -286,7 +278,10 @@ impl Task for TranspileUnitsTask {
     type JsValue = TranspileUnitsResult;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        to_napi_units_result(transpile::transpile_units_caught(&self.units, &self.filename))
+        to_napi_units_result(transpile::transpile_units_caught(
+            &self.units,
+            &self.filename,
+        ))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {

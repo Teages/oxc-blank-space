@@ -1,10 +1,8 @@
-//! Port of `src/visitor/expression.ts`.
-
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 
-use crate::precedence::has_unsafe_nullish_logical_mix;
-use crate::walk::{VisitResult, Walker, argument_index};
+use super::precedence::has_unsafe_nullish_logical_mix;
+use super::walk::{VisitResult, Walker, argument_index};
 
 pub(crate) fn visit_call_or_new<'a>(
     w: &mut Walker<'a>,
@@ -56,9 +54,7 @@ pub(crate) fn visit_type_assertion<'a>(
 ) -> VisitResult {
     let result = w.visit_nested_expr(expression);
     let node_end = node_span.end;
-    let parent_matches = w
-        .parent_statement_end()
-        .is_some_and(|end| node_end == end)
+    let parent_matches = w.parent_statement_end().is_some_and(|end| node_end == end)
         && w.src_byte(node_end) != Some(b';');
     if parent_matches {
         let expression_end = expression.span().end;
@@ -79,7 +75,6 @@ pub(crate) fn visit_logical_expression<'a>(
     w: &mut Walker<'a>,
     node: &'a LogicalExpression<'a>,
 ) -> VisitResult {
-    // Whether an expression is an `as`/`satisfies` assertion.
     fn is_assertion(expr: &Expression<'_>) -> bool {
         matches!(
             expr,

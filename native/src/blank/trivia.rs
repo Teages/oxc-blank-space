@@ -1,12 +1,6 @@
-//! Port of `src/core/trivia.ts`, rebuilt on the parser's token stream.
-//!
-//! The JS implementation byte-scans trivia to locate the tokens around erased
-//! markers (`?`, `!`, modifier keywords, the `(` moved out of multi-line
-//! generic parameter lists). The native parser collects the full token stream
-//! (`TokensParserConfig`) in the same pass as parsing, so every one of those
-//! lookups becomes an exact binary search over source-ordered tokens — and the
-//! comment map the JS version needed for backward scans disappears entirely
-//! (comments are not tokens, so they are transparent to token lookups).
+//! Exact token lookups by source offset. The parser collects the full token
+//! stream (`TokensParserConfig`) in the same pass as parsing; comments are not
+//! tokens, so they are transparent to every lookup here.
 
 use std::cell::Cell;
 
@@ -33,11 +27,7 @@ impl<'a> TokenIndex<'a> {
     /// Partition point of a monotone predicate over the token slice, searched
     /// by galloping outward from the last lookup hint before falling back to a
     /// binary search inside the bracketed window.
-    fn partition_point_hinted(
-        &self,
-        pred: impl Fn(&Token) -> bool,
-        hint: usize,
-    ) -> usize {
+    fn partition_point_hinted(&self, pred: impl Fn(&Token) -> bool, hint: usize) -> usize {
         let n = self.tokens.len();
         let probe = hint.min(n);
         let mut lower;
@@ -100,18 +90,16 @@ impl<'a> TokenIndex<'a> {
         count.checked_sub(1).and_then(|i| self.tokens.get(i))
     }
 
-    /// The span of the `marker` token directly before `anchor` (only trivia
-    /// may sit between them, which token adjacency guarantees), mirroring the
-    /// JS "scan backwards past trivia and check the character" helper.
+    /// Span of the `marker` token directly before `anchor`; only trivia may
+    /// sit between them, which token adjacency guarantees.
     pub fn marker_before(&self, anchor: u32, marker: Kind) -> Option<Span> {
         let token = self.token_before(anchor)?;
         (token.kind() == marker).then(|| token.span())
     }
 
-    /// Whether the node text ends with `;` or a same-line `;` directly follows
-    /// it. The TypeScript AST includes trailing semicolons in statement spans
-    /// while oxc does not, so callers checking "did the emitted code end with a
-    /// semicolon" need this parity helper.
+    /// Whether the text in [start, end) ends with `;` or a same-line `;`
+    /// directly follows it. Statement spans do not include the trailing
+    /// semicolon, so callers must also look at what comes after.
     pub fn ends_with_semicolon(&self, start: u32, end: u32) -> bool {
         if let Some(token) = self.token_before(end)
             && token.kind() == Kind::Semicolon

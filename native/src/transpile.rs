@@ -1,11 +1,9 @@
-//! Port of `src/index.ts` — parse + blank pipeline.
-
 use std::sync::OnceLock;
 
 use oxc_allocator::{Allocator, AllocatorPool};
 use oxc_diagnostics::NamedSource;
-use oxc_parser::config::TokensParserConfig;
 use oxc_parser::Parser;
+use oxc_parser::config::TokensParserConfig;
 use oxc_span::SourceType;
 
 /// Arena pool shared by sync and async calls (the async entry runs on the
@@ -20,8 +18,8 @@ pub(crate) fn allocator_pool() -> &'static AllocatorPool {
     })
 }
 
-use crate::blanker::UnsupportedSyntax;
-use crate::walk::{blank_program, blank_program_utf16};
+use crate::blank::blanker::UnsupportedSyntax;
+use crate::visit::walk::{blank_program, blank_program_utf16};
 
 pub struct TranspileOutput {
     pub code: String,
@@ -47,9 +45,8 @@ pub struct TranspileUnitsOutput {
 pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String> {
     let allocator_guard = allocator_pool().get();
     let allocator: &Allocator = &allocator_guard;
-    // Unknown/no extension: the JS entry parses plain JavaScript here (the
-    // parser's own extension guess falls back to a module without JSX), so
-    // TypeScript syntax must fail exactly like it does there.
+    // Unknown/no extension parses as plain JavaScript (module, no JSX), so
+    // TypeScript syntax fails there instead of parsing as TS.
     let source_type = SourceType::from_path(filename)
         .unwrap_or_else(|_| SourceType::mjs())
         .with_module(true);
@@ -59,24 +56,18 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
 
     // Hard parse failures leave no usable AST: the input is not valid
     // TypeScript, so surface it as a syntax error rather than silently
-    // passing TypeScript through as if it were JavaScript. (Soft parse
-    // errors still produce a recovered AST, which we process like
-    // ts-blank-space does for TypeScript's recovered trees.)
+    // passing TypeScript through. (Soft parse errors still produce a
+    // recovered AST, which is processed like any other.)
     if return_value.program.body.is_empty()
         && return_value.program.directives.is_empty()
         && return_value.diagnostics.has_errors()
     {
-        // render each diagnostic with its codeframe — the default oxc
-        // reporter produces byte-identical output to the codeframes the JS
-        // entry receives from oxc-parser
         let details = return_value
             .diagnostics
             .iter()
             .map(|d| {
-                d.clone().render_with_source_code(NamedSource::new(
-                    filename,
-                    input.to_string(),
-                ))
+                d.clone()
+                    .render_with_source_code(NamedSource::new(filename, input.to_string()))
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -104,11 +95,18 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         byte_to_unit.push(copy.len() as u32);
         let unit = units[index];
         let is_high = (0xD800..0xDC00).contains(&unit);
-        let next_low = matches!(units.get(index + 1), Some(next) if (0xDC00..0xE000).contains(next));
+        let next_low =
+            matches!(units.get(index + 1), Some(next) if (0xDC00..0xE000).contains(next));
         let mut buf = [0u8; 4];
         if is_high && next_low {
-            let code = 0x10000 + (((unit - 0xD800) as u32) << 10) + (units[index + 1] - 0xDC00) as u32;
-            copy.extend_from_slice(char::from_u32(code).expect("valid pair").encode_utf8(&mut buf).as_bytes());
+            let code =
+                0x10000 + (((unit - 0xD800) as u32) << 10) + (units[index + 1] - 0xDC00) as u32;
+            copy.extend_from_slice(
+                char::from_u32(code)
+                    .expect("valid pair")
+                    .encode_utf8(&mut buf)
+                    .as_bytes(),
+            );
             // the low surrogate needs its own map entry or every later unit
             // index shifts by one; the entry points at the middle of the
             // astral char's bytes — a position no span boundary can land on,
@@ -129,7 +127,7 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
 
     let allocator_guard = allocator_pool().get();
     let allocator: &Allocator = &allocator_guard;
-    // same extension fallback as [`transpile`] for JS-entry parity
+    // same extension fallback as [`transpile`]
     let source_type = SourceType::from_path(filename)
         .unwrap_or_else(|_| SourceType::mjs())
         .with_module(true);
@@ -147,10 +145,8 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
             .diagnostics
             .iter()
             .map(|d| {
-                d.clone().render_with_source_code(NamedSource::new(
-                    filename,
-                    parse_copy.clone(),
-                ))
+                d.clone()
+                    .render_with_source_code(NamedSource::new(filename, parse_copy.clone()))
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -175,7 +171,10 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         })
         .collect();
 
-    Ok(TranspileUnitsOutput { code: code_units, unsupported })
+    Ok(TranspileUnitsOutput {
+        code: code_units,
+        unsupported,
+    })
 }
 
 /// [`transpile_units`] with panic containment (see [`transpile_caught`]).
@@ -183,13 +182,19 @@ pub fn transpile_units_caught(
     units: &[u16],
     filename: &str,
 ) -> Result<TranspileUnitsOutput, String> {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile_units(units, filename))) {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        transpile_units(units, filename)
+    })) {
         Ok(result) => result,
         Err(payload) => {
             let detail = payload
                 .downcast_ref::<String>()
                 .cloned()
-                .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
+                .or_else(|| {
+                    payload
+                        .downcast_ref::<&'static str>()
+                        .map(|s| (*s).to_string())
+                })
                 .unwrap_or_else(|| "panic".to_string());
             Err(format!("internal error: {detail}"))
         }
@@ -206,7 +211,11 @@ pub fn transpile_caught(input: &str, filename: &str) -> Result<TranspileOutput, 
             let detail = payload
                 .downcast_ref::<String>()
                 .cloned()
-                .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
+                .or_else(|| {
+                    payload
+                        .downcast_ref::<&'static str>()
+                        .map(|s| (*s).to_string())
+                })
                 .unwrap_or_else(|| "panic".to_string());
             Err(format!("internal error: {detail}"))
         }
@@ -227,7 +236,8 @@ mod tests {
 
     #[test]
     fn reports_and_rejects() {
-        let output = transpile("class C { constructor(private a: string) {} }", "input.ts").unwrap();
+        let output =
+            transpile("class C { constructor(private a: string) {} }", "input.ts").unwrap();
         assert_eq!(output.unsupported.len(), 1);
         assert_eq!(output.unsupported[0].node_type, "TSParameterProperty");
 

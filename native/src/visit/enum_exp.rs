@@ -1,5 +1,3 @@
-//! Port of `src/visitor/enum.ts`.
-//!
 //! Enums have runtime behavior, so instead of being blanked they are expanded
 //! in place into the same IIFE shape the TypeScript compiler emits:
 //!
@@ -18,14 +16,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use oxc_ast::ast::*;
 use oxc_ast::AstKind;
+use oxc_ast::ast::*;
 use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
-use crate::walk::Walker;
+use super::walk::{Walker, unit_at};
 
-/// Expand `enum`/`const enum` in place (see [`visit_enum_declaration`]).
+/// Expand `enum`/`const enum` in place.
 pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     let enum_name = node.id.name.as_str().to_string();
 
@@ -33,9 +31,7 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     // is erased together with the keyword.
     let first = w.blanker.tokens.token_from(node.span().start);
     let keyword = match first {
-        Some(token) if token.kind() == Kind::Const => {
-            w.blanker.tokens.token_from(token.span().end)
-        }
+        Some(token) if token.kind() == Kind::Const => w.blanker.tokens.token_from(token.span().end),
         other => other,
     };
     let Some(keyword_token) = keyword.filter(|token| token.kind() == Kind::Enum) else {
@@ -62,14 +58,13 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
         let member_name = member_name_of(w, member);
         let key = member_key(w, member);
         let initializer = member.initializer.as_ref();
-        let constant = initializer
-            .and_then(|init| eval_constant(init, &constants, &member_name));
+        let constant = initializer.and_then(|init| eval_constant(init, &constants, &member_name));
 
         if let Some(Expression::StringLiteral(literal)) = initializer {
             // String-valued members emit a plain property assignment without
-            // reverse mapping, matching the TypeScript emitter. The raw value
-            // text is taken from the original code units on the UTF-16 path —
-            // the lossy parse copy would corrupt raw lone surrogates.
+            // reverse mapping (TypeScript emitter shape). The raw value text
+            // comes from the original code units on the UTF-16 path — the
+            // lossy parse copy would corrupt raw lone surrogates.
             let raw_units = w.original_span_units(literal.span);
             w.blanker.output.override_range_units(
                 member_span.start,
@@ -79,14 +74,16 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
             );
             previous = None;
         } else if let Some(value) = constant {
-            // Constant initializers are emitted as the computed value,
-            // matching the TypeScript emitter.
+            // Constant initializers are emitted as the computed value.
             constants.insert(member_name.clone(), value);
             previous = Some(value);
             w.blanker.output.override_range(
                 member_span.start,
                 member_span.end,
-                format!("{enum_name}[{enum_name}[{key}] = {}] = {key}", js_number_to_string(value)),
+                format!(
+                    "{enum_name}[{enum_name}[{key}] = {}] = {key}",
+                    js_number_to_string(value)
+                ),
             );
         } else if let Some(init) = initializer {
             // Non-constant initializer: keep its source text, qualifying bare
@@ -97,12 +94,10 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
                 init.span().start,
                 format!("{enum_name}[{enum_name}[{key}] = "),
             );
-            qualify_member_references(w, init, &enum_name, &member_names);
-            w.blanker.output.override_range(
-                init.span().end,
-                member_span.end,
-                format!("] = {key}"),
-            );
+            qualify_expr(w, init, &enum_name, &member_names);
+            w.blanker
+                .output
+                .override_range(init.span().end, member_span.end, format!("] = {key}"));
         } else if let Some(value) = previous {
             let value = value + 1.0;
             constants.insert(member_name.clone(), value);
@@ -110,7 +105,10 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
             w.blanker.output.override_range(
                 member_span.start,
                 member_span.end,
-                format!("{enum_name}[{enum_name}[{key}] = {}] = {key}", js_number_to_string(value)),
+                format!(
+                    "{enum_name}[{enum_name}[{key}] = {}] = {key}",
+                    js_number_to_string(value)
+                ),
             );
         } else {
             // Auto-increment after a non-computable member — the input is a
@@ -140,25 +138,25 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
 }
 
 /// Unquoted member name, used for the constants map and sibling-reference
-/// qualification. Mirrors the JS `memberNameOf` (decoded `String(id.value)`).
+/// qualification (the decoded `String(id.value)`).
 fn member_name_of(w: &Walker<'_>, member: &TSEnumMember<'_>) -> String {
     match &member.id {
         TSEnumMemberName::Identifier(id) => id.name.as_str().to_string(),
         TSEnumMemberName::String(literal) | TSEnumMemberName::ComputedString(literal) => {
             literal.value.as_str().to_string()
         }
-        // Invalid TS (computed template); keep raw text like the JS version.
+        // invalid TS (computed template); keep the raw text
         TSEnumMemberName::ComputedTemplateString(template) => {
             w.src[template.span().start as usize..template.span().end as usize].to_string()
         }
     }
 }
 
-/// The quoted enum property key: `JSON.stringify(memberName)` in the JS
-/// implementation. The member name is decoded from the raw literal source (not
-/// the AST's lossy `value` string, which replaces lone-surrogate escapes with
-/// U+FFFD) as UTF-16 code units, so escaped lone surrogates (`"\uD800"`) are
-/// re-emitted exactly like `JSON.stringify` does — lowercase `\udXXXX`.
+/// The quoted enum property key (`JSON.stringify(memberName)` shape). The
+/// member name is decoded from the raw literal source — not the AST's lossy
+/// `value` string, which replaces lone-surrogate escapes with U+FFFD — as
+/// UTF-16 code units, so escaped lone surrogates (`"\uD800"`) re-emit exactly
+/// like `JSON.stringify` does: lowercase `\udXXXX`.
 fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
     match &member.id {
         TSEnumMemberName::Identifier(id) => json_quote(id.name.as_str()),
@@ -168,8 +166,8 @@ fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
             let inner_end = span.end - 1;
             let units: Vec<u16> = match (&w.units, &w.byte_to_unit) {
                 (Some(units), Some(byte_to_unit)) => {
-                    // UTF-16 path: decode from the original code units, which
-                    // preserve raw lone surrogates losslessly.
+                    // decode from the original code units, which preserve raw
+                    // lone surrogates losslessly
                     let u0 = unit_at(byte_to_unit, inner_start);
                     let u1 = unit_at(byte_to_unit, inner_end);
                     decode_units(&units[u0 as usize..u1 as usize])
@@ -189,7 +187,7 @@ fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
             json_quote_utf16(&units)
         }
         TSEnumMemberName::ComputedTemplateString(template) => {
-            // JS: memberNameOf returns the raw span text, JSON.stringify quotes it
+            // raw span text, quoted like any other name
             json_quote(&w.src[template.span().start as usize..template.span().end as usize])
         }
     }
@@ -250,8 +248,8 @@ fn decode_units(units: &[u16]) -> Vec<u16> {
                         j += 1;
                     }
                     if units.get(j) == Some(&0x7D) && value <= 0x10FFFF {
-                        // lone surrogates stay as single units; JSON.stringify
-                        // re-escapes them exactly like the JS implementation
+                        // lone surrogates stay as single units and get
+                        // re-escaped by json_quote_utf16
                         if (0xD800..=0xDFFF).contains(&value) {
                             out.push(value as u16);
                         } else {
@@ -350,12 +348,6 @@ fn json_quote_utf16(units: &[u16]) -> String {
     }
     out.push('"');
     out
-}
-
-/// Unit index of the unit starting at byte offset `pos` (byte-to-unit maps
-/// are strictly increasing).
-pub(crate) fn unit_at(byte_to_unit: &[u32], pos: u32) -> u32 {
-    byte_to_unit.partition_point(|&b| b < pos) as u32
 }
 
 /// `JSON.stringify` of a JS string, used for the quoted member key text.
@@ -583,9 +575,7 @@ fn eval_constant(
                 constants.get(identifier.name.as_str()).copied()
             }
         }
-        E::ParenthesizedExpression(paren) => {
-            eval_constant(&paren.expression, constants, self_name)
-        }
+        E::ParenthesizedExpression(paren) => eval_constant(&paren.expression, constants, self_name),
         E::UnaryExpression(unary) => {
             let value = eval_constant(&unary.argument, constants, self_name)?;
             match unary.operator {
@@ -628,8 +618,9 @@ fn eval_constant(
 
 /// Rewrite bare references to this enum's members inside a non-constant
 /// initializer (`B = A + f()` → `B = E.A + f()`): inside the IIFE only the
-/// enum binding itself is in scope.
-fn qualify_member_references(
+/// enum binding itself is in scope. `qualify_expr` is the entry point;
+/// `qualify_index` recurses over the flat tree.
+fn qualify_expr(
     w: &mut Walker<'_>,
     expr: &Expression<'_>,
     enum_name: &str,
@@ -639,12 +630,7 @@ fn qualify_member_references(
     qualify_index(w, start, enum_name, member_names);
 }
 
-fn qualify_index(
-    w: &mut Walker<'_>,
-    idx: u32,
-    enum_name: &str,
-    member_names: &HashSet<String>,
-) {
+fn qualify_index(w: &mut Walker<'_>, idx: u32, enum_name: &str, member_names: &HashSet<String>) {
     let kind = w.node_kind(idx);
     match kind {
         AstKind::IdentifierReference(identifier) => {
@@ -681,22 +667,10 @@ fn qualify_index(
         _ => {
             for child in w.children_of(idx).collect::<Vec<_>>() {
                 qualify_index(w, child, enum_name, member_names);
-        }
+            }
         }
     }
 }
-
-
-fn qualify_expr(
-    w: &mut Walker<'_>,
-    expr: &Expression<'_>,
-    enum_name: &str,
-    member_names: &HashSet<String>,
-) {
-    let start = AstKind::from_expression(expr).node_id().index() as u32;
-    qualify_index(w, start, enum_name, member_names);
-}
-
 
 #[cfg(test)]
 mod tests {
@@ -719,6 +693,9 @@ mod tests {
         assert_eq!(js_number_to_string(1e-7), "1e-7");
         // exact tie: the even candidate wins (1381472817847324.25 sits
         // exactly halfway between ...324.2 and ...324.3)
-        assert_eq!(js_number_to_string(1381472817847324.2), "1381472817847324.2");
+        assert_eq!(
+            js_number_to_string(1381472817847324.2),
+            "1381472817847324.2"
+        );
     }
 }

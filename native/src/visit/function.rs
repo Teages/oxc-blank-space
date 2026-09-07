@@ -1,11 +1,9 @@
-//! Port of `src/visitor/function.ts`.
-
 use oxc_ast::ast::*;
 use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
-use crate::pattern;
-use crate::walk::{VisitResult, Walker, statement_index};
+use super::pattern;
+use super::walk::{VisitResult, Walker, statement_index};
 
 pub(crate) fn visit_function_like<'a>(w: &mut Walker<'a>, node: &'a Function<'a>) -> VisitResult {
     if node.body.is_none() {
@@ -13,7 +11,7 @@ pub(crate) fn visit_function_like<'a>(w: &mut Walker<'a>, node: &'a Function<'a>
         if node.declare {
             w.blanker.blank_statement(node.span());
         } else {
-            w.blanker.blank_exact(node.span());
+            w.blanker.blank_span(node.span());
         }
         return VisitResult::Blanked;
     }
@@ -87,21 +85,19 @@ fn visit_function_parts<'a>(
 
     // A `this` pseudo-parameter is erased entirely.
     if let Some(this) = this_param {
-        w.blanker.blank_exact_and_optional_trailing_comma(this.span());
+        w.blanker
+            .blank_exact_and_optional_trailing_comma(this.span());
     }
 
     for item in &params.items {
         pattern::visit_formal_parameter(w, item);
     }
-    // Rest parameters live in a separate field in the native AST; estree
-    // appends them as the last (RestElement) parameter.
+    // rest parameters live in a separate field in the native AST
     if let Some(rest) = &params.rest {
-        // estree RestElement: visitPattern(argument) then blankOwnAnnotation.
-        let result = pattern::visit_pattern(w, &rest.rest.argument);
+        pattern::visit_pattern(w, &rest.rest.argument);
         if let Some(ta) = &rest.type_annotation {
             w.blanker.blank_type_annotation(ta.span());
         }
-        let _ = result;
     }
 
     if let Some(rt) = return_type {
@@ -130,8 +126,7 @@ fn visit_function_parts<'a>(
 fn visit_body<'a>(w: &mut Walker<'a>, body: Option<&BodyRef<'a>>) {
     match body {
         Some(BodyRef::Block(fb)) => {
-            // estree's BlockStatement body has directives prepended to the
-            // statements; visit the same array.
+            // directives are prepended to the statement list
             let mut indices = Vec::with_capacity(fb.directives.len() + fb.statements.len());
             for directive in &fb.directives {
                 indices.push(node_index!(directive));
@@ -157,9 +152,16 @@ pub(crate) fn blank_type_parameters(
     open_paren: i64,
 ) {
     let span = type_parameters.span();
-    if open_paren >= 0 && w.blanker.tokens.spans_lines(span.start + 1, open_paren as u32 + 1) {
-        w.blanker.output.blank_but_start_with_open_paren(span.start, span.end);
-        w.blanker.blank_range(open_paren as u32, open_paren as u32 + 1);
+    if open_paren >= 0
+        && w.blanker
+            .tokens
+            .spans_lines(span.start + 1, open_paren as u32 + 1)
+    {
+        w.blanker
+            .output
+            .blank_but_start_with_open_paren(span.start, span.end);
+        w.blanker
+            .blank_range(open_paren as u32, open_paren as u32 + 1);
     } else {
         w.blanker.blank_span(span);
     }
@@ -177,13 +179,9 @@ fn arrow_return_type_spans_lines(
     w.blanker.tokens.spans_lines(params_end, return_type_end)
 }
 
-/// End of the last parameter (rest included, matching the estree array), or
+/// End of the last parameter (rest included), or
 /// the position right after `(` / the node start when there are none.
-fn last_param_end(
-    params: &FormalParameters<'_>,
-    open_paren: i64,
-    node_start: u32,
-) -> u32 {
+fn last_param_end(params: &FormalParameters<'_>, open_paren: i64, node_start: u32) -> u32 {
     params
         .rest
         .as_ref()
@@ -216,10 +214,9 @@ fn find_params_open_paren(
         match current.kind() {
             Kind::LParen => return current.span().start as i64,
             Kind::Star => token = w.blanker.tokens.token_from(current.span().end),
-            kind
-                if kind.is_identifier()
-                    || kind.is_reserved_keyword()
-                    || kind.is_contextual_keyword() =>
+            kind if kind.is_identifier()
+                || kind.is_reserved_keyword()
+                || kind.is_contextual_keyword() =>
             {
                 token = w.blanker.tokens.token_from(current.span().end);
             }
@@ -242,8 +239,7 @@ fn find_closing_paren(
     open_paren: i64,
     node_start: u32,
 ) -> i64 {
-    // With no parameters, scanning starts right after the `(` like
-    // TypeScript's empty NodeArray position does.
+    // with no parameters, scanning starts right after the `(`
     let mut pos = last_param_end(params, open_paren, node_start);
     // Skip the parameter-list trailing comma; only `,` or `)` can follow.
     let mut token = w.blanker.tokens.token_from(pos);

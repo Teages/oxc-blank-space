@@ -1,20 +1,17 @@
-//! Port of `src/visitor/pattern.ts`.
-//!
-//! In the estree view the type annotations and `?`/`!` markers hang on the
-//! pattern nodes themselves; the native AST hoists them onto the pattern's
-//! holder (`VariableDeclarator`, `FormalParameter`, `CatchParameter`,
-//! `FormalParameterRest`). [`HeldPattern`] re-attaches those fields to the
-//! pattern node so the blanking happens at exactly the point in the walk order
-//! where the JS implementation emits it.
+//! The native AST hoists type annotations and `?`/`!` markers onto the
+//! pattern's holder (`VariableDeclarator`, `FormalParameter`,
+//! `CatchParameter`, `FormalParameterRest`). [`HeldPattern`] re-attaches those
+//! fields to the pattern node so the blanking happens at the right point in
+//! the walk order.
 
 use oxc_ast::ast::*;
 use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
-use crate::walk::{VisitResult, Walker};
+use super::walk::{VisitResult, Walker};
 
-/// A pattern node plus the annotation/optional fields the estree view would
-/// carry on it.
+/// A pattern node plus the annotation/optional fields that hang on its holder
+/// in the native AST.
 #[derive(Clone, Copy)]
 pub(crate) struct HeldPattern<'a, 'b> {
     pub pattern: &'b BindingPattern<'a>,
@@ -64,8 +61,7 @@ pub(crate) fn visit_pattern<'a>(
     )
 }
 
-/// Port of `visitPattern(node)` where `node` is the estree pattern carrying
-/// `held`'s annotation and optional flag.
+/// Visit a pattern together with its holder's annotation and optional flag.
 fn visit_held<'a>(w: &mut Walker<'a>, held: HeldPattern<'a, 'a>) -> VisitResult {
     match held.pattern {
         BindingPattern::BindingIdentifier(_) => {
@@ -79,7 +75,6 @@ fn visit_held<'a>(w: &mut Walker<'a>, held: HeldPattern<'a, 'a>) -> VisitResult 
             if let Some(rest) = &o.rest {
                 visit_pattern(w, &rest.argument);
             }
-            // JS blankOwnAnnotation runs after the properties loop.
             blank_own_annotation(w, held, o.span().end);
             VisitResult::Js
         }
@@ -94,9 +89,9 @@ fn visit_held<'a>(w: &mut Walker<'a>, held: HeldPattern<'a, 'a>) -> VisitResult 
             VisitResult::Js
         }
         BindingPattern::AssignmentPattern(ap) => {
-            // estree AssignmentPattern: the left side carries the holder's
-            // annotation; the AssignmentPattern node itself carries only the
-            // optional flag (never an annotation in binding position).
+            // the left side carries the holder's annotation; the
+            // AssignmentPattern node itself carries only the optional flag
+            // (never an annotation in binding position).
             let result = visit_held(
                 w,
                 HeldPattern {
@@ -120,9 +115,8 @@ fn visit_held<'a>(w: &mut Walker<'a>, held: HeldPattern<'a, 'a>) -> VisitResult 
     }
 }
 
-/// Port of `blankOwnAnnotation`: erase the `?`/`!` marker sitting directly
-/// before the annotation (or at the end of the pattern span), then the
-/// annotation itself.
+/// Erase the `?` marker sitting directly before the annotation (or at the end
+/// of the pattern span), then the annotation itself.
 fn blank_own_annotation<'a, 'b>(w: &mut Walker<'a>, held: HeldPattern<'a, 'b>, node_end: u32) {
     if held.optional {
         let anchor = held
@@ -136,7 +130,7 @@ fn blank_own_annotation<'a, 'b>(w: &mut Walker<'a>, held: HeldPattern<'a, 'b>, n
     }
 }
 
-/// estree `Property` in a binding position: `{ a: b = 1 }` or shorthand `{ a }`.
+/// Binding property: `{ a: b = 1 }` or shorthand `{ a }`.
 fn visit_binding_property<'a>(
     w: &mut Walker<'a>,
     property: &'a BindingProperty<'a>,
@@ -148,8 +142,8 @@ fn visit_binding_property<'a>(
     visit_pattern(w, &property.value)
 }
 
-/// Visit a function parameter: reports constructor parameter properties, then
-/// mirrors the estree converter's shape for the parameter.
+/// Visit a function parameter: constructor parameter properties are reported,
+/// then the pattern is visited with the parameter's annotation/optional flag.
 pub(crate) fn visit_formal_parameter<'a>(w: &mut Walker<'a>, param: &'a FormalParameter<'a>) {
     if param.has_modifier() {
         // Constructor parameter properties create runtime members.
@@ -157,10 +151,9 @@ pub(crate) fn visit_formal_parameter<'a>(w: &mut Walker<'a>, param: &'a FormalPa
     }
 
     if let Some(init) = &param.initializer {
-        // estree AssignmentPattern: left = pattern with the annotation
-        // attached, right = default; the AssignmentPattern itself has no
-        // annotation and never gets a marker (optional-with-default is a
-        // TypeScript error).
+        // left = pattern with the annotation attached, right = default; the
+        // AssignmentPattern itself carries no annotation and never gets a
+        // marker (optional-with-default is a TypeScript error).
         visit_held(
             w,
             HeldPattern {
@@ -180,7 +173,6 @@ pub(crate) fn visit_formal_parameter<'a>(w: &mut Walker<'a>, param: &'a FormalPa
         );
         w.visit_nested_expr(init);
     } else {
-        // estree flattens the pattern with the annotation and `?` attached.
         visit_held(
             w,
             HeldPattern {

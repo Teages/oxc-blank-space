@@ -1,22 +1,19 @@
-//! Port of `src/visitor/walk.ts`.
-//!
-//! The JS implementation walks an ESTree-shaped AST generically via
-//! `visitorKeys`. In Rust the oxc AST is strongly typed, so instead of dynamic
-//! dispatch we run one cheap "flatten" pass over the AST (assigning each node a
-//! sequential index and recording its tree children) and then run the exact
-//! same recursive algorithm over that flat tree, dispatching on `AstKind`.
+//! The oxc AST is strongly typed, so instead of dynamic dispatch one cheap
+//! "flatten" pass assigns each node a sequential index and records its tree
+//! children; the recursive walk then dispatches on `AstKind` over that flat
+//! tree.
 
 use std::mem::take;
 
-use oxc_ast::ast::*;
 use oxc_ast::AstKind;
-use oxc_parser::Token;
+use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
+use oxc_parser::Token;
 use oxc_span::{GetSpan, Span};
 use oxc_syntax::node::NodeId;
 
-use crate::blanker::{Blanker, UnsupportedSyntax};
-use crate::{class, enum_exp, expression, function, namespace, pattern, statement};
+use super::{class, enum_exp, expression, function, namespace, pattern, statement};
+use crate::blank::blanker::{Blanker, UnsupportedSyntax};
 /// Result of visiting a node.
 /// - `js`: JavaScript was (or may have been) emitted for this node.
 /// - `blanked`: the node was fully erased, it contains no runtime code.
@@ -122,8 +119,8 @@ pub fn blank_program<'a>(
         parent_statement: None,
     };
 
-    // Top level: estree's `program.body` contains directives prepended to the
-    // statements; mirror that array (all statement-like, not a function body).
+    // Top level: directives are prepended to the statement list (all
+    // statement-like, not a function body).
     let mut indices = Vec::with_capacity(program.directives.len() + program.body.len());
     for directive in &program.directives {
         indices.push(node_index!(directive));
@@ -263,7 +260,7 @@ impl<'a> Walker<'a> {
             .map(|idx| self.nodes[idx as usize].span().end)
     }
 
-    /// Byte at `pos`, if any (mirrors `src[pos]` being `undefined` in JS).
+    /// Byte at `pos`, if any.
     pub(crate) fn src_byte(&self, pos: u32) -> Option<u8> {
         self.src.as_bytes().get(pos as usize).copied()
     }
@@ -301,7 +298,9 @@ impl<'a> Walker<'a> {
         self.blanker.semicolon_needed = !self.blanker.ends_with_semicolon(span);
     }
 
-    /// Port of `Blanker.visitNodeArray`.
+    /// Visit a statement list: each entry becomes `parent_statement`, the
+    /// semicolon state updates after JS-emitting entries, and function bodies
+    /// reset the ASI state for their duration.
     pub(crate) fn visit_node_array(
         &mut self,
         indices: &[u32],
@@ -332,7 +331,6 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// Port of `Blanker.visitNodeArray` over a typed statement slice.
     pub(crate) fn visit_statement_slice(
         &mut self,
         statements: &'a [Statement<'a>],
@@ -349,8 +347,8 @@ impl<'a> Walker<'a> {
     pub(crate) fn original_span_units(&self, span: Span) -> Vec<u16> {
         match (self.units, self.byte_to_unit) {
             (Some(units), Some(byte_to_unit)) => {
-                let u0 = crate::walk::unit_at(byte_to_unit, span.start) as usize;
-                let u1 = crate::walk::unit_at(byte_to_unit, span.end) as usize;
+                let u0 = unit_at(byte_to_unit, span.start) as usize;
+                let u1 = unit_at(byte_to_unit, span.end) as usize;
                 units[u0..u1].to_vec()
             }
             _ => self.src[span.start as usize..span.end as usize]
@@ -405,7 +403,7 @@ impl<'a> Walker<'a> {
     pub(crate) fn visit_node(&mut self, idx: u32) -> VisitResult {
         let kind = self.nodes[idx as usize];
         match kind {
-            // estree `Identifier` (references, bindings, names, labels).
+            // all identifier flavors are plain JS
             AstKind::IdentifierReference(_)
             | AstKind::IdentifierName(_)
             | AstKind::BindingIdentifier(_)
@@ -425,19 +423,13 @@ impl<'a> Walker<'a> {
 
             AstKind::ExportDeclaration(n) => statement::visit_exported_declaration(self, n),
 
-            AstKind::ExportNamedDeclaration(n) => statement::visit_export_specifiers(
-                self,
-                n.span(),
-                n.export_kind,
-                &n.specifiers,
-            ),
+            AstKind::ExportNamedDeclaration(n) => {
+                statement::visit_export_specifiers(self, n.span(), n.export_kind, &n.specifiers)
+            }
 
-            AstKind::ExportFromDeclaration(n) => statement::visit_export_specifiers(
-                self,
-                n.span(),
-                n.export_kind,
-                &n.specifiers,
-            ),
+            AstKind::ExportFromDeclaration(n) => {
+                statement::visit_export_specifiers(self, n.span(), n.export_kind, &n.specifiers)
+            }
 
             AstKind::TSExportAssignment(n) => {
                 // `export = ...` has runtime behavior.
@@ -514,12 +506,15 @@ impl<'a> Walker<'a> {
                 VisitResult::Js
             }
 
-            AstKind::PropertyDefinition(_) | AstKind::AccessorProperty(_)
+            AstKind::PropertyDefinition(_)
+            | AstKind::AccessorProperty(_)
             | AstKind::MethodDefinition(_) => class::visit_class_member(self, kind),
 
             AstKind::TSNonNullExpression(n) => expression::visit_non_null_expression(self, n),
 
-            AstKind::TSAsExpression(n) => expression::visit_type_assertion(self, n.span(), &n.expression),
+            AstKind::TSAsExpression(n) => {
+                expression::visit_type_assertion(self, n.span(), &n.expression)
+            }
 
             AstKind::TSSatisfiesExpression(n) => {
                 expression::visit_type_assertion(self, n.span(), &n.expression)
@@ -554,7 +549,7 @@ impl<'a> Walker<'a> {
             }
 
             AstKind::TSIndexSignature(n) => {
-                self.blanker.blank_exact(n.span());
+                self.blanker.blank_span(n.span());
                 VisitResult::Blanked
             }
 
@@ -574,12 +569,10 @@ impl<'a> Walker<'a> {
     }
 }
 
-// Statement and declaration kinds, mirroring TypeScript's `isStatement`: the
-/// first element of a child array decides whether the array is walked with
-/// statement tracking (`parentStatement`). Native `Function`/`Class` map to
-/// the estree `FunctionDeclaration`/`ClassDeclaration` names only when their
-/// type flag says so (`TSDeclareFunction` is deliberately *not* included,
-/// matching the JS set).
+/// Statement and declaration kinds: the first element of a child array decides
+/// whether the array is walked with statement tracking (`parent_statement`).
+/// `Function`/`Class` count only in their declaration form —
+/// `TSDeclareFunction` is deliberately *not* included.
 fn is_statement_like(kind: AstKind<'_>) -> bool {
     match kind {
         AstKind::Function(f) => f.r#type == FunctionType::FunctionDeclaration,
@@ -622,4 +615,3 @@ fn is_statement_like(kind: AstKind<'_>) -> bool {
         ),
     }
 }
-
