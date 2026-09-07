@@ -1,0 +1,49 @@
+name: pkg.pr.new preview
+
+# Continuous previews: every PR and every push to a branch publishes an
+# installable tarball of the full bundled package (all platform binaries +
+# wasm) to https://pkg.pr.new. Requires the pkg-pr-new GitHub App
+# (https://github.com/apps/pkg-pr-new) to be installed on this repository.
+on:
+  pull_request:
+  push:
+    branches: ['**']
+    tags: ['!**']
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pkg-pr-new-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    uses: ./.github/workflows/native-build.yml
+    permissions:
+      contents: read
+
+  publish:
+    needs: native
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      # the same prebuilt-assembly path the release pack job uses
+      NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm i -g corepack@latest && corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binding-*
+          path: ${{ runner.temp }}/native-bindings
+          merge-multiple: true
+      - run: pnpm install
+      - name: Build package from prebuilt binaries
+        run: node scripts/assemble-dist.mjs
+      - name: Publish preview to pkg.pr.new
+        run: pnpm exec pkg-pr-new publish --packageManager=pnpm
