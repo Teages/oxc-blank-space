@@ -108,6 +108,7 @@ jobs:
         working-directory: native
         run: |
           cargo zigbuild --release --target ${{ matrix.target }}.2.28
+          mkdir -p ../dist
           cp target/${{ matrix.target }}/release/liboxc_blank_space_native.so ../dist/${{ matrix.artifact }}
       - if: ${{ !endsWith(matrix.target, 'linux-gnu') }}
         name: Build
