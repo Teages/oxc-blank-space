@@ -27,9 +27,6 @@ jobs:
     needs: native
     runs-on: ubuntu-latest
     permissions: {}
-    env:
-      # the same prebuilt-assembly path the release pack job uses
-      NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
     steps:
       - uses: actions/checkout@v4
       - run: npm i -g corepack@latest && corepack enable
@@ -45,5 +42,11 @@ jobs:
       - run: pnpm install
       - name: Build package from prebuilt binaries
         run: node scripts/assemble-dist.mjs
+        # the same prebuilt-assembly path the release pack job uses; `runner`
+        # is not available in job-level env, so set it per step
+        env:
+          NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
       - name: Publish preview to pkg.pr.new
         run: pnpm exec pkg-pr-new publish --packageManager=pnpm
+        env:
+          NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
