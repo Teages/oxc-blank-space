@@ -85,6 +85,52 @@ describe.skipIf(!nativeBindingAvailable)('experimental-native', () => {
     expect(() => transpileSync(input)).toThrow(SyntaxError)
   })
 
+  it('reports onError offsets as UTF-16 character offsets for non-ASCII input', async () => {
+    // `文` is 1 UTF-16 unit but 3 UTF-8 bytes, `😀` is 2 units / 4 bytes —
+    // JS offsets are character-based, the native entry must match.
+    const input = `const 文 = "😀"; export = foo;`
+    const jsReports: UnsupportedSyntax[] = []
+    transpile(input, { onError: node => jsReports.push(node) })
+    const nativeReports: UnsupportedSyntax[] = []
+    const output = await transpileAsync(input, {
+      onError: node => nativeReports.push(node),
+    })
+    expect(output).toBe(transpile(input))
+    expect(nativeReports).toEqual(jsReports)
+    const [report] = nativeReports
+    expect(input.slice(report.start, report.end)).toBe('export = foo;')
+    const syncReports: UnsupportedSyntax[] = []
+    transpileSync(input, { onError: node => syncReports.push(node) })
+    expect(syncReports).toEqual(jsReports)
+  })
+
+  it('formats large enum constants with JS shortest round-trip digits', async () => {
+    // the double nearest to 1000000000000000100 prints with JS shortest
+    // round-trip digits, not its exact binary value ...128
+    const input = `enum E { A = 1000000000000000100 }`
+    const output = await transpileAsync(input)
+    expect(output).toBe(transpile(input))
+    expect(output).toContain('1000000000000000100')
+    expect(output).not.toContain('1000000000000000128')
+    const syncOutput = transpileSync(input)
+    expect(syncOutput).toBe(transpile(input))
+    expect(syncOutput).toContain('1000000000000000100')
+  })
+
+  it('documents lossy handling of raw lone surrogates', () => {
+    // Raw lone surrogates cannot survive the UTF-8 boundary: napi replaces
+    // them with U+FFFD, while the JS implementation passes them through.
+    // Rust cannot represent them losslessly, so this divergence is kept
+    // (and pinned here) rather than fixed.
+    const input = `// ${String.fromCodePoint(0xD800)}\nlet a = 1;`
+    const jsOutput = transpile(input)
+    expect(jsOutput).toContain(String.fromCodePoint(0xD800))
+    const syncOutput = transpileSync(input)
+    expect(syncOutput.length).toBe(jsOutput.length)
+    expect(syncOutput).toContain('\uFFFD')
+    expect(syncOutput).not.toBe(jsOutput)
+  })
+
   it('rejects grouping-unsafe as-erasures with a SyntaxError', async () => {
     // `1 + 1 as T / 2` would change meaning when the assertion is erased;
     // oxc refuses to parse it, and the native binding must surface that.

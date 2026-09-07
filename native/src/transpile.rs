@@ -68,6 +68,22 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
     Ok(TranspileOutput { code, unsupported })
 }
 
+/// [`transpile`] with panic containment: a bug in an untested AST corner must
+/// surface as a JS exception, not abort the process (napi does not catch
+/// unwinds by default, for either the sync binding or async task compute).
+pub fn transpile_caught(input: &str, filename: &str) -> Result<TranspileOutput, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile(input, filename)))
+        .unwrap_or_else(|payload| {
+            let detail = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
+                .unwrap_or_else(|| "panic".to_string());
+            Err(format!("internal error: {detail}"))
+        })
+        .and_then(Ok)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

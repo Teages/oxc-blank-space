@@ -172,8 +172,11 @@ fn json_quote(s: &str) -> String {
     out
 }
 
-/// JS `Number.prototype.toString`-style formatting for enum constants
-/// (`${constant}` in the JS implementation).
+/// `String(value)` — the JS `Number::toString` algorithm. Rust's `LowerExp`
+/// yields the shortest round-trip digits; the digits are then laid out per the
+/// ECMAScript specification (decimal form for -6 < n <= 21, exponential
+/// otherwise). Exact-value formatting (`{:.0}`) would print
+/// `1000000000000000128` where JS prints `1000000000000000100`.
 fn js_number_to_string(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
@@ -181,16 +184,53 @@ fn js_number_to_string(value: f64) -> String {
     if value.is_infinite() {
         return if value < 0.0 { "-Infinity" } else { "Infinity" }.to_string();
     }
-    if value == value.trunc() && value.abs() < 1e21 {
-        // Integral values print without a fractional part.
-        if value.abs() < 9.007_199_254_740_992e15 {
-            return format!("{}", value as i64);
-        }
-        return format!("{value:.0}");
+    if value == 0.0 {
+        return "0".to_string();
     }
-    // Shortest round-trip representation; the exotic magnitudes where JS
-    // switches to exponent notation cannot come out of enum constant folding.
-    format!("{value:?}")
+
+    let negative = value.is_sign_negative();
+    let scientific = format!("{:e}", value.abs());
+    let (mantissa, exponent) = scientific.split_once('e').expect("LowerExp form");
+    let exponent: i32 = exponent.parse().expect("decimal exponent");
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let digits = digits.trim_end_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
+    let k = digits.len() as i32;
+    let n = exponent + 1;
+
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    if -6 < n && n <= 21 {
+        if n >= k {
+            out.push_str(digits);
+            for _ in 0..(n - k) {
+                out.push('0');
+            }
+        } else if n > 0 {
+            out.push_str(&digits[..n as usize]);
+            out.push('.');
+            out.push_str(&digits[n as usize..]);
+        } else {
+            out.push_str("0.");
+            for _ in 0..(-n) {
+                out.push('0');
+            }
+            out.push_str(digits);
+        }
+    } else {
+        out.push_str(&digits[..1]);
+        if k > 1 {
+            out.push('.');
+            out.push_str(&digits[1..]);
+        }
+        out.push('e');
+        let exponent = n - 1;
+        out.push(if exponent < 0 { '-' } else { '+' });
+        out.push_str(&exponent.abs().to_string());
+    }
+    out
 }
 
 fn to_int32(value: f64) -> i32 {
@@ -343,4 +383,26 @@ fn qualify_expr(
 ) {
     let start = AstKind::from_expression(expr).node_id().index() as u32;
     qualify_index(w, start, enum_name, member_names);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn js_number_formatting() {
+        assert_eq!(js_number_to_string(0.0), "0");
+        assert_eq!(js_number_to_string(5.0), "5");
+        assert_eq!(js_number_to_string(-1.0), "-1");
+        assert_eq!(js_number_to_string(1.5), "1.5");
+        // shortest round-trip digits, not the exact binary value
+        assert_eq!(
+            js_number_to_string(1000000000000000128.0),
+            "1000000000000000100"
+        );
+        assert_eq!(js_number_to_string(1e20), "100000000000000000000");
+        assert_eq!(js_number_to_string(1e21), "1e+21");
+        assert_eq!(js_number_to_string(1e-6), "0.000001");
+        assert_eq!(js_number_to_string(1e-7), "1e-7");
+    }
 }

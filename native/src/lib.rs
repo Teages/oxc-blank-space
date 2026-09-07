@@ -71,7 +71,25 @@ fn resolve_filename(options: Option<&TranspileNativeOptions>) -> String {
         })
 }
 
+/// The API contract (`types.ts`) promises character offsets — JS string
+/// indices, i.e. UTF-16 code units. Internal spans are UTF-8 bytes; convert
+/// so `input.slice(start, end)` slices the same text on both entries.
+fn utf16_offset(input: &str, byte_offset: u32) -> u32 {
+    if input.is_ascii() {
+        return byte_offset;
+    }
+    let mut offset = byte_offset as usize;
+    while offset > 0 && !input.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    input[..offset]
+        .chars()
+        .map(|c| c.len_utf16() as u32)
+        .sum()
+}
+
 fn to_napi_result(
+    input: &str,
     output: std::result::Result<transpile::TranspileOutput, String>,
 ) -> Result<TranspileNativeResult> {
     let output = output.map_err(|message| Error::new(Status::GenericFailure, message))?;
@@ -82,8 +100,8 @@ fn to_napi_result(
             .into_iter()
             .map(|report| NativeUnsupported {
                 node_type: report.node_type.to_string(),
-                start: report.start,
-                end: report.end,
+                start: utf16_offset(input, report.start),
+                end: utf16_offset(input, report.end),
             })
             .collect(),
     })
@@ -99,7 +117,10 @@ impl Task for TranspileTask {
     type JsValue = TranspileNativeResult;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        to_napi_result(transpile::transpile(&self.input, &self.filename))
+        to_napi_result(
+            &self.input,
+            transpile::transpile_caught(&self.input, &self.filename),
+        )
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -127,7 +148,8 @@ pub fn transpile_native_sync(
     options: Option<TranspileNativeOptions>,
 ) -> Result<TranspileNativeResult> {
     let filename = resolve_filename(options.as_ref());
-    to_napi_result(transpile::transpile(&input, &filename))
+    let input_ref = input.as_str();
+    to_napi_result(input_ref, transpile::transpile_caught(&input, &filename))
 }
 
 #[cfg(test)]
