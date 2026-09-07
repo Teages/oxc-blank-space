@@ -191,4 +191,12 @@ The test suite includes the upstream fixture corpus (`test/fixture`) and asserts
 
 ## License
 
-Apache-2.0. Derived from [ts-blank-space](https://github.com/bloomberg/ts-blank-space) (© Bloomberg Finance L.P., Apache-2.0).
+[MIT](./LICENSE) — © 2025-present Teages.
+
+The test fixture corpus in `test/fixture` is derived from
+[ts-blank-space](https://github.com/bloomberg/ts-blank-space)
+(© 2024 Bloomberg Finance L.P.) and remains under the
+[Apache License 2.0](./test/fixture/LICENSE). Published binaries embed
+[oxc](https://github.com/oxc-project/oxc) and [napi-rs](https://napi.rs)
+(both MIT); bundled JavaScript dependencies are listed in
+`dist/THIRD-PARTY-LICENSES.md` at build time.

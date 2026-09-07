@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "packageManager": "pnpm@11.1.2",
   "description": "A type-stripper that blanks TypeScript-only syntax using the oxc parser, preserving line and column positions.",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": "Teages/oxc-blank-space",
   "sideEffects": false,
   "exports": {
