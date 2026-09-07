@@ -5,9 +5,13 @@ A small, fast type-stripper that blanks TypeScript-only syntax using the [oxc pa
 ```ts
 import { transpile } from '@teages/oxc-blank-space'
 
-console.log(transpile(`const a: number = 1`))
+console.log(await transpile(`const a: number = 1`))
 // result: `const a         = 1`
 ```
+
+The library is a Rust implementation delivered as a native Node addon
+(`napi-rs`), with a WebAssembly build for browsers — there is no JavaScript
+fallback.
 
 ## What it does
 
@@ -22,7 +26,7 @@ console.log(transpile(`const a: number = 1`))
 Enums are expanded in place into the same IIFE shape the TypeScript compiler emits, so runtime behavior (including reverse numeric mappings and member references) is preserved exactly:
 
 ```ts
-transpile(`enum Color { Red, Green = 5 }`)
+await transpile(`enum Color { Red, Green = 5 }`)
 // 'var  Color; (function (Color) { Color[Color["Red"] = 0] = "Red";
 //   Color[Color["Green"] = 5] = "Green" })(Color || (Color = {}));'
 ```
@@ -31,7 +35,7 @@ transpile(`enum Color { Red, Green = 5 }`)
 
 ### Unerasable assertions
 
-TypeScript now rejects `as`/`satisfies` assertions whose erasure would change operator grouping — `1 + 1 as T / 2` parses as `(1 + 1 as T) / 2`, but erasing the assertion yields `1 + 1 / 2` (see [TypeScript#63527](https://github.com/microsoft/TypeScript/issues/63527), enforced by oxc 0.135+). Inputs containing such assertions cannot be parsed: `transpile()` throws a `SyntaxError` carrying the parser's diagnostics.
+TypeScript now rejects `as`/`satisfies` assertions whose erasure would change operator grouping — `1 + 1 as T / 2` parses as `(1 + 1 as T) / 2`, but erasing the assertion yields `1 + 1 / 2` (see [TypeScript#63527](https://github.com/microsoft/TypeScript/issues/63527), enforced by oxc 0.135+). Inputs containing such assertions cannot be parsed: `transpile` rejects and `transpileSync` throws a `SyntaxError` carrying the parser's diagnostics.
 
 Assertions inside unparenthesized `??`/`&&`/`||` mixes (`a && b as T ?? c`) are kept verbatim and reported through `onError`, mirroring ts-blank-space.
 
@@ -45,19 +49,20 @@ Truly unsupported constructs are kept verbatim and reported through `onError`:
 - legacy prefix type assertions (`<T>expr`)
 
 ```ts
-transpile(`class C { constructor(private a: string) {} }`, {
+await transpile(`class C { constructor(private a: string) {} }`, {
   onError: (node) => {
     // node.type === 'TSParameterProperty', node.start / node.end offsets
   },
 })
 ```
 
-Inputs oxc cannot parse at all throw a `SyntaxError` carrying the parser's diagnostics — invalid TypeScript is never silently passed through as if it were JavaScript.
+Inputs oxc cannot parse at all are rejected: a `SyntaxError` carrying the parser's diagnostics — invalid TypeScript is never silently passed through as if it were JavaScript.
 
 ## API
 
 ```ts
-function transpile(input: string, options?: TranspileOptions): string
+function transpile(input: string, options?: TranspileOptions): Promise<string>
+function transpileSync(input: string, options?: TranspileOptions): string
 
 interface TranspileOptions {
   /** Called once per unsupported construct. */
@@ -69,97 +74,76 @@ interface TranspileOptions {
 }
 ```
 
-## Experimental native entry point
+`transpile` runs the pipeline off the calling thread; `transpileSync` runs it
+inline. Both produce byte-for-byte identical output. `onError` is invoked
+after transpilation with the kept-verbatim constructs; parse failures
+surface as `SyntaxError`s whose message carries the parser's codeframe.
 
-`@teages/oxc-blank-space/experimental-native` exposes the same transpilation as
-a Rust implementation (this repo rewritten in Rust, living under `native/`),
-as a synchronous/async pair — `transpileSync` runs the pipeline on the calling
-thread, `transpileAsync` runs it on a background thread. Either way the oxc AST
-never crosses into JavaScript:
+## Implementation & platforms
+
+The transpiler is written in Rust (`native/`), driven through napi. The
+published package bundles a prebuilt binary for every platform the loader
+matches — darwin-x64/arm64, linux-x64/arm64 in glibc and musl variants, and
+win32-x64/arm64 (~1.3 MB each; the loader picks strictly by
+`process.platform`, `process.arch` and libc, so a mismatched binary is never
+loaded). The `native build` workflow builds all of them — six by
+cross-compilation — and smoke-loads each on matching hardware.
+
+### Browser entry
+
+`@teages/oxc-blank-space/browser` exposes the identical `transpile`/
+`transpileSync` pair from the same Rust code compiled to `wasm32-wasip1`:
 
 ```ts
-import { transpileAsync, transpileSync } from '@teages/oxc-blank-space/experimental-native'
+import { transpile } from '@teages/oxc-blank-space/browser'
 
-transpileSync(`const a: number = 1`)
-// 'const a         = 1'
-await transpileAsync(`const a: number = 1`)
+await transpile(`const a: number = 1`)
 // 'const a         = 1'
 ```
 
-Both accept the same `TranspileOptions` as `transpile` (including `onError`,
-which is invoked with the kept-verbatim unsupported constructs after
-transpilation) and throw a `SyntaxError` when the input cannot be parsed — the
-async entry rejects. `nativeBindingAvailable` reports whether the binary has
-been built; the entry throws on use otherwise. The output is byte-for-byte
-identical to the JS implementation; `test/native.test.ts` asserts this against
-the fixture corpus and inline cases.
+The wasm runtime (`@napi-rs/wasm-runtime`, emnapi) is bundled into the entry,
+so the package carries zero runtime dependencies; only the `.wasm` module is
+loaded as an asset. It needs `fetch` and WebAssembly (no SharedArrayBuffer,
+no cross-origin isolation). The async entry runs on emnapi's async workers;
+on the main thread of a browser page it behaves like the sync call between
+microtasks.
 
-> [!NOTE]
-> Experimental: both entries report `onError` after transpilation rather than
-> during it, and the binary must be built per-platform (`pnpm build:native`).
+### Behavior parity
 
-> [!NOTE]
-> Experimental: both entries report `onError` after transpilation rather than
-> during it, and the binary must be built per-platform (`pnpm build:native`).
+Raw lone surrogates cannot survive the UTF-8 boundary into Rust, so inputs
+containing one are routed to dedicated UTF-16 entry points internally: the
+parser sees a lossy copy while the output is assembled from the original code
+units, preserving raw lone surrogates losslessly. Enum member keys decoded
+from such escapes re-escape as `\udXXX` rather than collapsing to U+FFFD, so
+runtime property access on the transpiled output keeps resolving.
 
-### Known divergences from the JS implementation
-
-- **Raw lone surrogates** cannot survive the UTF-8 boundary into Rust, so
-  inputs containing one are routed to dedicated UTF-16 entry points
-  (`transpileUtf16Async`/`transpileUtf16Sync`): the parser sees a lossy copy
-  while the output is assembled from the original code units, preserving raw
-  lone surrogates losslessly.
-- **Raw lone surrogates as enum member names**: the JS entry's output key is
-  lossy (U+FFFD — a consequence of oxc-parser's Rust-side string transfer),
-  while the native entries re-escape it as `\udXXX`. The native behavior is
-  intentional: it keeps the transpiled program's property access working,
-  matching the original source's runtime semantics. This is the one input
-  class where the native output intentionally differs from the JS
-  implementation.
-- **Distribution**: the loader matches the artifact by
-  `process.platform`/`process.arch` and, on Linux, glibc vs musl (strict — a
-  wrong-libc binary is never loaded), and on Windows expects the `-msvc`
-  artifact. The `native build` workflow builds all eight matching targets
-  (darwin-x64/arm64, linux-x64/arm64 × gnu/musl, win32-x64/arm64) on every
-  native change — six of them cross-compiled — and smoke-loads each binary on
-  matching hardware. Wiring those artifacts into the release pipeline is the
-  remaining step before making a native entry the default export.
-
-With those caveats, the behavior suites (`test/*.test.ts`) run every test
-against both native entries in addition to the JS implementation, so the
-implementations stay byte-for-byte identical on every covered input —
-including 100k seeded random doubles exercised through enum expansion
-(number formatting implements the ECMAScript round-half-to-even rules
-exactly). CI enforces native availability with `NATIVE_REQUIRED=1`.
+The behavior suites (`test/*.test.ts`) run every test against the synchronous
+API and cross-check each call against the async API — output, `onError`
+reports and rejection messages byte for byte — against the `ts-blank-space`
+reference fixtures. A separate suite exercises the wasm binding; the `native
+build` workflow smoke-loads every shipped binary, including wasm, and a
+100k-value seeded double sweep pins the enum-expansion number formatting to
+`Number.prototype.toString` (round-half-to-even ties included).
 
 ## Benchmark
 
-`pnpm bench` runs `bench/transpile.bench.ts` (vitest bench) comparing the JS
-implementation against both native entries. Measured on an Apple M-series
-laptop, Node 24:
+`pnpm bench` runs `bench/transpile.bench.ts` (vitest bench) over both entry
+points. Measured on an Apple M-series laptop, Node 24:
 
-| input | js | native transpileSync | native transpileAsync |
-| --- | --- | --- | --- |
-| inline snippet | 83.6k ops/s | 530.9k ops/s (6.4x) | 137.2k ops/s (1.6x) |
-| fixture corpus (~15KB) | 1.1k ops/s | 9.1k ops/s (8.2x) | 8.2k ops/s (7.4x) |
-| large (~100KB) | 116 ops/s | 1.0k ops/s (8.8x) | 1.0k ops/s (9.0x) |
-| enum heavy | 2.5k ops/s | 8.9k ops/s (3.5x) | 7.9k ops/s (3.1x) |
+| input | transpileSync | transpile (async) |
+| --- | --- | --- |
+| inline snippet | 530.9k ops/s | 137.2k ops/s |
+| fixture corpus (~15KB) | 9.1k ops/s | 8.2k ops/s |
+| large (~100KB) | 1.0k ops/s | 1.0k ops/s |
+| enum heavy | 8.9k ops/s | 7.9k ops/s |
 
-The gap against the JS implementation comes from keeping the whole
-parse-and-blank pipeline in Rust: the JS implementation pays for transferring
-the oxc AST into JavaScript objects and walking it dynamically, while the
-native entries walk the typed AST in place. The native crate also enables
-`TokensParserConfig` so exact token lookups replace the trivia byte-scanning
-of the JS version, builds the output in one exactly-sized buffer, and pools
-its arena allocators across calls.
-
-Sync vs async has its own gap, driven by the per-call fixed cost of the napi
-thread-pool hop (dispatch + promise plumbing, roughly 5µs here): on the tiny
-inline input `transpileSync` is ~3.9x faster than `transpileAsync`; from the
-~15KB fixture corpus upward the two converge to within ~10% (large input:
-on par, with the async entry keeping the main thread free). Rule of thumb:
-use `transpileSync` for small, frequent inputs; `transpileAsync` once inputs
-are non-trivial or concurrency matters.
+The sync/async gap is the per-call fixed cost of the napi thread-pool hop
+(dispatch + promise plumbing, roughly 5µs here): on the tiny inline input
+`transpileSync` is ~3.9x faster than `transpile`; from the ~15KB fixture
+corpus upward the two converge to within ~10% (large input: on par, with the
+async entry keeping the main thread free). Rule of thumb: use
+`transpileSync` for small, frequent inputs; `transpile` once inputs are
+non-trivial or concurrency matters.
 
 `native/src/lib.rs` contains an `#[ignore]`d measurement harness for the
 Rust-side numbers — run it with
@@ -173,7 +157,7 @@ which a no-AST fork like oxidase avoids at the cost of forking the parser).
 
 | | ts-blank-space | @teages/oxc-blank-space |
 | --- | --- | --- |
-| Parser | TypeScript compiler | oxc (Rust, via napi) |
+| Parser | TypeScript compiler | oxc (Rust, native addon + wasm) |
 | Output contract | whitespace, positions preserved | identical |
 | Semantics | — | differential-tested byte-for-byte against ts-blank-space fixtures |
 
@@ -183,14 +167,15 @@ which a no-AST fork like oxidase avoids at the cost of forking the parser).
 pnpm install
 pnpm test        # eslint + tsc --noEmit + vitest run --coverage
 pnpm lint        # eslint (antfu config), lint:fix to auto-fix
-pnpm build       # obuild → dist (ESM + types) + napi release build
-pnpm build:native  # napi build --release → dist/*.node (required for tests/bench)
-pnpm bench       # vitest bench: js vs native implementations
+pnpm build       # native binary + wasm module + obundle → dist
+pnpm build:native  # only the local platform binary
+pnpm build:wasm    # only the wasm32-wasip1 module
+pnpm bench       # vitest bench: sync vs async entries
 pnpm play        # run the playground against a stub build
 pnpm release     # changelogen release + publish
 ```
 
-The test suite includes the upstream fixture corpus (`test/fixture`) and asserts that every output matches `ts-blank-space` byte for byte. CI (`.github/workflows`) runs lint, typecheck, build and coverage on every PR.
+The test suite includes the upstream fixture corpus (`test/fixture`) and asserts that every output matches `ts-blank-space` byte for byte. CI (`.github/workflows`) runs lint, typecheck, build and coverage on every PR, and the `native build` workflow builds and smoke-tests all nine artifacts (eight platform binaries plus wasm) on every `native/**` change.
 
 ## License
 
