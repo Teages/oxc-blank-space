@@ -36,7 +36,8 @@
   },
   "browser": "binding.wasip1-browser.js",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "dependencies": {
     "@emnapi/core": "2.0.0-alpha.5",
