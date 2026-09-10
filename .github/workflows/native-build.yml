@@ -4,16 +4,11 @@ name: native build
 # can pick up (see platformBinary), cross-compiling wherever possible, and
 # smoke-loads each binary on matching hardware. Artifacts are named
 # `binding-<triple>` so a release pipeline can download the full matrix.
+# Runs only as a reusable workflow: pkg-pr-new.yml calls it on PRs and
+# main pushes, release.yml on tags. No push/pull_request triggers of its
+# own — a direct run shares the concurrency group below with those calls
+# and one of the two gets cancelled on every push.
 on:
-  push:
-    branches: [main]
-    paths:
-      - native/**
-      - scripts/smoke-native.mjs
-      - .github/workflows/native-build.yml
-  # no pull_request trigger: pkg-pr-new.yml already runs this matrix on
-  # every PR, and a direct run would share the concurrency group with
-  # that call and cancel it
   workflow_dispatch:
   workflow_call:
 
