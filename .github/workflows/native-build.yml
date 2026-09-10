@@ -11,11 +11,9 @@ on:
       - native/**
       - scripts/smoke-native.mjs
       - .github/workflows/native-build.yml
-  pull_request:
-    paths:
-      - native/**
-      - scripts/smoke-native.mjs
-      - .github/workflows/native-build.yml
+  # no pull_request trigger: pkg-pr-new.yml already runs this matrix on
+  # every PR, and a direct run would share the concurrency group with
+  # that call and cancel it
   workflow_dispatch:
   workflow_call:
 

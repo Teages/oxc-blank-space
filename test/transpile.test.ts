@@ -31,6 +31,51 @@ describe('transpile', () => {
     expect(output).toContain('return `hi ${name}`;')
   })
 
+  it('keeps CR/LF when blanking and replaces U+2028/U+2029 with spaces', () => {
+    // Given: blanked type declarations containing each line terminator kind.
+    // Pinned behavior: blanked regions preserve CR/LF as line breaks and turn
+    // U+2028/U+2029 into single spaces like any other character, matching the
+    // reference implementation; the UTF-16 length is kept either way
+    const cases = [
+      ['\r\n', true],
+      ['\r', true],
+      ['\u2028', false],
+      ['\u2029', false],
+    ] as const
+    for (const [separator, preserved] of cases) {
+      const input = `type T${separator}= 'x';\nconst after = 1;\n`
+      // When: transpiled
+      const output = transpile(input)
+      // Then: the output matches the reference byte for byte, keeps the
+      // total length, and preserves exactly the CR/LF terminators
+      expect(output).toEqual(tsBlankSpace(input))
+      expect(output.length).toBe(input.length)
+      expect(output.includes(separator)).toBe(preserved)
+    }
+  })
+
+  it('applies the pinned line-terminator behavior on the UTF-16 path', () => {
+    // Given: a raw lone surrogate routing the input through the UTF-16 entry
+    // points; the pinned CR/LF vs U+2028/U+2029 behavior must not differ
+    const surrogate = String.fromCharCode(0xD800)
+    const cases = [
+      ['\r\n', true],
+      ['\r', true],
+      ['\u2028', false],
+      ['\u2029', false],
+    ] as const
+    for (const [separator, preserved] of cases) {
+      const input = `type T${separator}= 'x';\nconst y = '${surrogate}';\n`
+      // When: transpiled
+      const output = transpile(input)
+      // Then: same pinned behavior, the surrogate survives, length unchanged
+      expect(output.length).toBe(input.length)
+      expect(output.includes(separator)).toBe(preserved)
+      expect(output).toContain(surrogate)
+      expect(output.endsWith(`const y = '${surrogate}';\n`)).toBe(true)
+    }
+  })
+
   it('erases interfaces and type aliases as blank statements', () => {
     // Given: type-only declarations
     const input

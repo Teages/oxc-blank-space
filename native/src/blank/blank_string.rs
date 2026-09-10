@@ -39,6 +39,32 @@ impl BlankString {
         self.ranges.push((REPLACE_WITH_TEXT, start, end, index));
     }
 
+    /// [`override_range`](Self::override_range) spliced in at its source
+    /// position among the already-pushed ranges. The enum walk erases an
+    /// initializer first and collects its reference rewrites second; the two
+    /// interleave by position, and out-of-order ranges would corrupt the
+    /// output in [`build`](Self::build).
+    pub fn override_range_sorted(&mut self, start: u32, end: u32, text: impl AsRef<str>) {
+        let index = self.texts.len() as u32;
+        self.texts.push(text.as_ref().encode_utf16().collect());
+        let at = self
+            .ranges
+            .partition_point(|&(_, range_start, _, _)| range_start <= start);
+        self.ranges
+            .insert(at, (REPLACE_WITH_TEXT, start, end, index));
+    }
+
+    /// Whether [start, end) overlaps any already-pushed range. The enum walk
+    /// runs reference qualification after the erasure pass: an identifier
+    /// inside an erased region (a type alias, an annotation) must not be
+    /// rewritten — splicing text into erased content corrupts the output.
+    pub fn overlaps_pushed_range(&self, start: u32, end: u32) -> bool {
+        let pushed = self
+            .ranges
+            .partition_point(|&(_, range_start, _, _)| range_start < end);
+        pushed > 0 && self.ranges[pushed - 1].2 > start
+    }
+
     pub fn blank_but_start_with_open_paren(&mut self, start: u32, end: u32) {
         self.ranges
             .push((REPLACE_WITH_OPEN_PAREN, start, end, u32::MAX));
@@ -226,6 +252,30 @@ mod tests {
         // Blank the `: number` annotation (8 chars, no newlines).
         bs.blank(7, 15);
         assert_eq!(bs.build(input), format!("const a{} = 1", " ".repeat(8)));
+    }
+
+    #[test]
+    fn blank_preserves_crlf_and_replaces_ls_ps_with_spaces() {
+        // Pinned behavior: blanked regions keep CR/LF as line breaks; U+2028
+        // and U+2029 become single spaces like any other character, matching
+        // the reference implementation. One space per UTF-16 unit keeps the
+        // length stable either way.
+        let input = "a\nb\r\nc\u{2028}d\u{2029}e";
+        let mut bs = BlankString::default();
+        bs.blank(0, input.len() as u32);
+        assert_eq!(bs.build(input), " \n \r\n     ");
+    }
+
+    #[test]
+    fn build_units_preserves_crlf_and_replaces_ls_ps_with_spaces() {
+        // The UTF-16 path pins the same behavior. byte_to_unit mirrors
+        // transpile_units' construction for "a\u{2028}b\u{2029}c": the
+        // parse-copy byte offset after each unit, plus the total sentinel.
+        let units: Vec<u16> = "a\u{2028}b\u{2029}c".encode_utf16().collect();
+        let byte_to_unit = [0u32, 1, 4, 5, 8, 9];
+        let mut bs = BlankString::default();
+        bs.blank(0, 9);
+        assert_eq!(bs.build_units(&units, &byte_to_unit), vec![0x20; 5]);
     }
 
     #[test]

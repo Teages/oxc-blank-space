@@ -1,13 +1,13 @@
 name: pkg.pr.new preview
 
-# Continuous previews: every PR and every push to a branch publishes an
+# Continuous previews: every PR and every push to main publishes an
 # installable tarball of the full bundled package (all platform binaries +
 # wasm) to https://pkg.pr.new. Requires the pkg-pr-new GitHub App
 # (https://github.com/apps/pkg-pr-new) to be installed on this repository.
 on:
   pull_request:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['!**']
   workflow_dispatch:
 
