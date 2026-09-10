@@ -6,7 +6,7 @@
     "play": "jiti ."
   },
   "dependencies": {
-    "@teages/oxc-blank-space": "workspace:*"
+    "petrea": "workspace:*"
   },
   "devDependencies": {
     "jiti": "2.7.0"

@@ -1,30 +1,31 @@
-# @teages/oxc-blank-space
+# petrea
 
-[![pkg.pr.new](https://pkg.pr.new/badge/Teages/oxc-blank-space)](https://pkg.pr.new/~/Teages/oxc-blank-space)
+[![pkg.pr.new](https://pkg.pr.new/badge/Teages/petrea)](https://pkg.pr.new/~/Teages/petrea)
 
 A small, fast type-stripper that blanks TypeScript-only syntax using the [oxc parser](https://oxc.rs), leaving valid JavaScript with identical line and column positions. A drop-in reimplementation of [ts-blank-space](https://github.com/bloomberg/ts-blank-space) on the oxc parser instead of the TypeScript compiler.
 
 ## Install
 
 ```bash
-npm install @teages/oxc-blank-space
+npm install petrea
 ```
 
 ## Getting Started
 
 ```ts
-import { transpile } from '@teages/oxc-blank-space'
+import { transpile } from 'petrea'
 
 console.log(await transpile(`const a: number = 1`))
 // result: `const a         = 1`
 ```
 
 `transpileSync` offers the same behavior synchronously, and
-`@teages/oxc-blank-space/browser` exposes the identical API for browsers via a
-WebAssembly build:
+`petrea/browser` exposes the identical API for browsers via a
+WebAssembly build (shipped as the `@petrea/binding-wasm32-wasip1` package,
+installed alongside the platform bindings as an optional dependency):
 
 ```ts
-import { transpile } from '@teages/oxc-blank-space/browser'
+import { transpile } from 'petrea/browser'
 
 await transpile(`const a: number = 1`)
 // 'const a         = 1'

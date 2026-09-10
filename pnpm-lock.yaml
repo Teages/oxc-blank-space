@@ -23,6 +23,9 @@ importers:
       '@napi-rs/wasm-runtime':
         specifier: ^1.2.3
         version: 1.2.3(@emnapi/core@2.0.0-alpha.5)(@emnapi/runtime@2.0.0-alpha.5)
+      '@petrea/binding-wasm32-wasip1':
+        specifier: workspace:*
+        version: link:npm/wasm32-wasip1
       '@tybys/wasm-util':
         specifier: ^0.10.3
         version: 0.10.3
@@ -63,9 +66,21 @@ importers:
         specifier: ^4.1.6
         version: 4.1.11(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(jiti@2.7.0)(yaml@2.9.0)
 
+  npm/wasm32-wasip1:
+    dependencies:
+      '@emnapi/core':
+        specifier: 2.0.0-alpha.5
+        version: 2.0.0-alpha.5
+      '@emnapi/runtime':
+        specifier: 2.0.0-alpha.5
+        version: 2.0.0-alpha.5
+      '@napi-rs/wasm-runtime':
+        specifier: ~1.2.3
+        version: 1.2.3(@emnapi/core@2.0.0-alpha.5)(@emnapi/runtime@2.0.0-alpha.5)
+
   playground:
     dependencies:
-      '@teages/oxc-blank-space':
+      petrea:
         specifier: workspace:*
         version: link:..
     devDependencies:
