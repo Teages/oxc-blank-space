@@ -1,9 +1,9 @@
 [package]
-name = "oxc-blank-space-native"
-version = "0.2.0"
+name = "petrea-binding"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
-description = "Native Rust implementation of @teages/oxc-blank-space"
+description = "Native Rust implementation of petrea"
 
 [lib]
 crate-type = ["cdylib"]
