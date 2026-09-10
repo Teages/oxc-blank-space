@@ -1,9 +1,11 @@
 name: pkg.pr.new preview
 
-# Continuous previews: every PR and every push to main publishes an
-# installable tarball of the full bundled package (all platform binaries +
-# wasm) to https://pkg.pr.new. Requires the pkg-pr-new GitHub App
-# (https://github.com/apps/pkg-pr-new) to be installed on this repository.
+# Continuous previews: every PR and every push to main publishes the main
+# package plus all @petrea/binding-* packages to https://pkg.pr.new in a
+# single publish call, so pkg.pr.new rewrites the main package's
+# optionalDependencies entries pointing at the batch into preview URLs.
+# Requires the pkg-pr-new GitHub App (https://github.com/apps/pkg-pr-new)
+# to be installed on this repository.
 on:
   pull_request:
   push:
@@ -40,13 +42,11 @@ jobs:
           path: ${{ runner.temp }}/native-bindings
           merge-multiple: true
       - run: pnpm install
-      - name: Build package from prebuilt binaries
-        run: node scripts/assemble-dist.mjs
-        # the same prebuilt-assembly path the release pack job uses; `runner`
-        # is not available in job-level env, so set it per step
+      - name: Assemble binding packages from prebuilt binaries
+        run: pnpm prepare-packages
         env:
           NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
       - name: Publish preview to pkg.pr.new
-        run: pnpm exec pkg-pr-new publish --packageManager=pnpm
-        env:
-          NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
+        # one call for the whole batch: the root package plus every binding
+        # package dir, so cross-references become pkg.pr.new URLs
+        run: pnpm exec pkg-pr-new publish --packageManager=pnpm . ./npm/*

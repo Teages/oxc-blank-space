@@ -20,6 +20,9 @@ on:
 
 permissions: {}
 
+env:
+  NPM_TAG: ${{ inputs.npm-tag || 'latest' }}
+
 jobs:
   # open or update a draft release PR from conventional commits
   pr:
@@ -64,56 +67,80 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # the chained dispatch lands here on the vX.Y.Z tag; build every platform
-  # binary + the wasm module first, then let pack assemble the tarball from
-  # the prebuilt artifacts (NAPI_PREBUILT_DIR)
+  # the chained dispatch lands here on the vX.Y.Z tag: build every platform
+  # binary + the wasm module first
   native:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
     uses: ./.github/workflows/native-build.yml
     permissions:
       contents: read
 
-  # build the tarball(s) from the prebuilt binaries
-  pack:
+  # assemble the binding packages from the prebuilt binaries, then publish
+  # the whole batch: every @petrea/binding-* package first, then the main
+  # `petrea` package whose optionalDependencies pin their exact versions
+  publish:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
     needs: native
     runs-on: ubuntu-latest
     concurrency:
-      group: pack-${{ github.ref }}
+      group: publish-${{ github.ref }}
       cancel-in-progress: false
-    permissions: {}
-    outputs:
-      files: ${{ steps.pack.outputs.files }}
+    # the npm environment is part of the trusted publisher identity: each
+    # package's publisher on npmjs.com names this repository, this workflow
+    # file, and this environment
+    environment: npm
+    permissions:
+      id-token: write
     steps:
+      - uses: actions/checkout@v4
+      - run: npm i -g corepack@latest && corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # trusted publishing needs 11.5.1 at minimum; the runner's bundled npm
+      # trails that. No auth token is configured: npm exchanges the Actions
+      # OIDC token for a publish credential itself
+      - name: Install npm with trusted publishing support
+        run: npm install -g npm@11.19.0
       - uses: actions/download-artifact@v4
         with:
           pattern: binding-*
           path: ${{ runner.temp }}/native-bindings
           merge-multiple: true
-      # NAPI_PREBUILT_DIR is downloaded outside the workspace so the pack
-      # checkout cannot wipe it; `runner` is not available in job-level env,
-      # so set it on the step that runs prepack
-      - id: pack
-        uses: danielroe/uppt/pack@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+      - run: pnpm install
+      - name: Assemble binding packages from prebuilt binaries
+        run: pnpm prepare-packages
         env:
           NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
-
-  # stage the prebuilt tarball(s) to npm via OIDC
-  publish:
-    if: |
-      github.event_name == 'workflow_dispatch'
-      && startsWith(github.ref, 'refs/tags/v')
-      && needs.pack.outputs.files != '[]'
-    needs: pack
-    runs-on: ubuntu-latest
-    concurrency:
-      group: publish-${{ github.ref }}
-      cancel-in-progress: false
-    permissions:
-      id-token: write
-    environment: npm
-    steps:
-      - uses: danielroe/uppt/publish@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
-        with:
-          files: ${{ needs.pack.outputs.files }}
-          npm-tag: ${{ inputs.npm-tag }}
+      # a rerun after a partial failure must not collide with the versions
+      # that already made it out
+      - name: Publish @petrea/binding-* packages
+        run: |
+          publish_if_needed() {
+            local pkg_name pkg_version
+            pkg_name=$(node -p "require('./package.json').name")
+            pkg_version=$(node -p "require('./package.json').version")
+            if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
+              echo "Skipping ${pkg_name}@${pkg_version} (already published)"
+              return 0
+            fi
+            npm publish --provenance --access public --tag "$NPM_TAG"
+          }
+          for pkg in npm/*/; do
+            if [ -f "$pkg/package.json" ]; then
+              echo "Publishing $(basename "$pkg")..."
+              (cd "$pkg" && publish_if_needed)
+            fi
+          done
+      - name: Publish petrea
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "Skipping ${PKG_NAME}@${PKG_VERSION} (already published)"
+            exit 0
+          fi
+          # prepack builds dist/ from src/; the binding packages ride along
+          # through optionalDependencies
+          npm publish --provenance --access public --tag "$NPM_TAG"

@@ -1,7 +1,7 @@
 name: native build
 
-# Builds the napi binding for every platform the loader in src/native.ts
-# can pick up (see platformBinary), cross-compiling wherever possible, and
+# Builds the napi binding for every platform the loader in src/index.ts
+# can pick up (see platformPackage), cross-compiling wherever possible, and
 # smoke-loads each binary on matching hardware. Artifacts are named
 # `binding-<triple>` so a release pipeline can download the full matrix.
 # Runs only as a reusable workflow: pkg-pr-new.yml calls it on PRs and
@@ -30,46 +30,46 @@ jobs:
           # macOS: Apple's toolchain cross-links both slices on the arm64 runner
           - target: aarch64-apple-darwin
             os: macos-15
-            artifact: oxc-blank-space-native.darwin-arm64.node
+            artifact: binding.darwin-arm64.node
             smoke: native
           - target: x86_64-apple-darwin
             os: macos-15
-            artifact: oxc-blank-space-native.darwin-x64.node
+            artifact: binding.darwin-x64.node
             smoke: rosetta
           # Linux: cargo-zigbuild provides the cross linker + libc; no glibc
           # pin is passed (napi's artifact naming cannot carry the `.X.Y`
           # suffix), so the ceiling check below guards the floor instead
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
-            artifact: oxc-blank-space-native.linux-x64-gnu.node
+            artifact: binding.linux-x64-gnu.node
             cross: true
             smoke: native
           - target: x86_64-unknown-linux-musl
             os: ubuntu-24.04
-            artifact: oxc-blank-space-native.linux-x64-musl.node
+            artifact: binding.linux-x64-musl.node
             cross: true
             smoke: alpine
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04
-            artifact: oxc-blank-space-native.linux-arm64-gnu.node
+            artifact: binding.linux-arm64-gnu.node
             cross: true
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04
-            artifact: oxc-blank-space-native.linux-arm64-musl.node
+            artifact: binding.linux-arm64-musl.node
             cross: true
           # Windows: the x64 runner's MSVC includes the ARM64 cross tools
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact: oxc-blank-space-native.win32-x64-msvc.node
+            artifact: binding.win32-x64-msvc.node
             smoke: native
           - target: aarch64-pc-windows-msvc
             os: windows-latest
-            artifact: oxc-blank-space-native.win32-arm64-msvc.node
-          # WebAssembly for the browser entry; smoke-tested in Node through
-          # the generated .wasip1.cjs loader
+            artifact: binding.win32-arm64-msvc.node
+          # WebAssembly for the @petrea/binding-wasm32-wasip1 package;
+          # smoke-tested in Node through the generated .wasip1.cjs loader
           - target: wasm32-wasip1
             os: ubuntu-24.04
-            artifact: oxc-blank-space-native.wasm32-wasip1.wasm
+            artifact: binding.wasm32-wasip1.wasm
             wasm: true
             smoke: wasm
     env:
@@ -105,22 +105,22 @@ jobs:
         run: echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
       - if: endsWith(matrix.target, 'linux-gnu')
         name: Build (glibc pinned to Node 20's 2.28 floor)
-        working-directory: native
         run: |
-          cargo zigbuild --release --target ${{ matrix.target }}.2.28
-          mkdir -p ../dist
-          cp target/${{ matrix.target }}/release/liboxc_blank_space_native.so ../dist/${{ matrix.artifact }}
+          # cargo resolves the target dir from the manifest (native/target),
+          # not from the cwd this step runs in
+          cargo zigbuild --release --target ${{ matrix.target }}.2.28 --manifest-path native/Cargo.toml
+          mkdir -p dist
+          cp native/target/${{ matrix.target }}/release/libpetrea_binding.so dist/${{ matrix.artifact }}
       - if: matrix.wasm
         name: Build
         run: node scripts/build-wasm.mjs
       - if: ${{ !matrix.wasm && !endsWith(matrix.target, 'linux-gnu') }}
         name: Build
-        working-directory: native
         run: >-
-          pnpm exec napi build --platform --release
+          pnpm exec napi build --platform --release --manifest-path native/Cargo.toml
           ${{ matrix.cross && '--cross-compile' || '' }}
           --target ${{ matrix.target }}
-          --output-dir ../dist
+          --output-dir dist
       - if: endsWith(matrix.target, 'linux-gnu')
         name: Check glibc symbol ceiling (Node 20 requires 2.28)
         run: |
@@ -152,7 +152,7 @@ jobs:
           node scripts/smoke-native.mjs dist/${{ matrix.artifact }}
       - if: matrix.smoke == 'wasm'
         name: Smoke test (wasm binding in Node)
-        run: node scripts/smoke-native.mjs wasm/oxc-blank-space-native.wasip1.cjs
+        run: node scripts/smoke-native.mjs npm/wasm32-wasip1/binding.wasip1.cjs
       - if: ${{ !matrix.wasm }}
         uses: actions/upload-artifact@v4
         with:
@@ -163,10 +163,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binding-${{ matrix.target }}
-          path: |
-            wasm/oxc-blank-space-native.wasm32-wasip1.wasm
-            wasm/oxc-blank-space-native.wasip1.cjs
-            wasm/oxc-blank-space-native.wasip1-browser.js
+          path: npm/wasm32-wasip1/binding.*
           if-no-files-found: error
 
   # the win32-arm64 binary is cross-compiled on an x64 runner; load it on
@@ -186,7 +183,7 @@ jobs:
           path: dist
       - name: Smoke test (native arm64)
         shell: bash
-        run: node scripts/smoke-native.mjs dist/oxc-blank-space-native.win32-arm64-msvc.node
+        run: node scripts/smoke-native.mjs dist/binding.win32-arm64-msvc.node
 
   # both arm64 Linux binaries are cross-built on x64; verify them on real
   # arm64 hardware — the gnu one directly, the musl one inside an arm64
@@ -206,8 +203,8 @@ jobs:
           merge-multiple: true
           path: dist
       - name: Smoke test (gnu, native arm64)
-        run: node scripts/smoke-native.mjs dist/oxc-blank-space-native.linux-arm64-gnu.node
+        run: node scripts/smoke-native.mjs dist/binding.linux-arm64-gnu.node
       - name: Smoke test (musl, arm64 Alpine)
         run: >-
           docker run --rm -v "$PWD":/work -w /work node:20-alpine
-          node scripts/smoke-native.mjs dist/oxc-blank-space-native.linux-arm64-musl.node
+          node scripts/smoke-native.mjs dist/binding.linux-arm64-musl.node
