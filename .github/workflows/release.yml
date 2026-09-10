@@ -75,9 +75,14 @@ jobs:
     permissions:
       contents: read
 
-  # assemble the binding packages from the prebuilt binaries, then publish
-  # the whole batch: every @petrea/binding-* package first, then the main
-  # `petrea` package whose optionalDependencies pin their exact versions
+  # assemble the binding packages from the prebuilt binaries, then STAGE the
+  # whole batch: every @petrea/binding-* package first, then the main `petrea`
+  # package whose optionalDependencies pin their exact versions. Nothing goes
+  # live from CI — `npm stage publish` only queues the versions; a maintainer
+  # approves each one interactively (`npm stage approve <stage-id>`, 2FA).
+  # Approval order matters: approve the bindings before petrea, so the main
+  # package never becomes installable while its optionalDependencies are
+  # still staged.
   publish:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
     needs: native
@@ -98,9 +103,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # trusted publishing needs 11.5.1 at minimum; the runner's bundled npm
+      # staged publishing needs 11.15 at minimum; the runner's bundled npm
       # trails that. No auth token is configured: npm exchanges the Actions
-      # OIDC token for a publish credential itself
+      # OIDC token for a stage credential itself — the trusted publishers on
+      # npmjs.com must allow stage-publishing for every package
       - name: Install npm with trusted publishing support
         run: npm install -g npm@11.19.0
       - uses: actions/download-artifact@v4
@@ -114,10 +120,12 @@ jobs:
         env:
           NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
       # a rerun after a partial failure must not collide with the versions
-      # that already made it out
-      - name: Publish @petrea/binding-* packages
+      # that already made it out. `npm view` only sees approved versions: a
+      # version that is still staged makes staging conflict — reject or
+      # approve it first, then rerun
+      - name: Stage @petrea/binding-* packages
         run: |
-          publish_if_needed() {
+          stage_if_needed() {
             local pkg_name pkg_version
             pkg_name=$(node -p "require('./package.json').name")
             pkg_version=$(node -p "require('./package.json').version")
@@ -125,15 +133,15 @@ jobs:
               echo "Skipping ${pkg_name}@${pkg_version} (already published)"
               return 0
             fi
-            npm publish --provenance --access public --tag "$NPM_TAG"
+            npm stage publish --provenance --access public --tag "$NPM_TAG"
           }
           for pkg in npm/*/; do
             if [ -f "$pkg/package.json" ]; then
-              echo "Publishing $(basename "$pkg")..."
-              (cd "$pkg" && publish_if_needed)
+              echo "Staging $(basename "$pkg")..."
+              (cd "$pkg" && stage_if_needed)
             fi
           done
-      - name: Publish petrea
+      - name: Stage petrea
         run: |
           PKG_NAME=$(node -p "require('./package.json').name")
           PKG_VERSION=$(node -p "require('./package.json').version")
@@ -141,6 +149,6 @@ jobs:
             echo "Skipping ${PKG_NAME}@${PKG_VERSION} (already published)"
             exit 0
           fi
-          # prepack builds dist/ from src/; the binding packages ride along
-          # through optionalDependencies
-          npm publish --provenance --access public --tag "$NPM_TAG"
+          # packing runs prepack, which builds dist/ from src/; the binding
+          # packages ride along through optionalDependencies
+          npm stage publish --provenance --access public --tag "$NPM_TAG"
