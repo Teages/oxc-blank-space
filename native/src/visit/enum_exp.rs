@@ -1,5 +1,6 @@
-//! Enums have runtime behavior, so instead of being blanked they are expanded
-//! in place into the same IIFE shape the TypeScript compiler emits:
+//! Enums have runtime behavior, so instead of being blanked they are
+//! expanded in place into the same IIFE shape the TypeScript compiler
+//! emits:
 //!
 //! ```ts
 //! enum Color { Red, Green = 5 }
@@ -9,118 +10,236 @@
 //! Color[Color["Green"] = 5] = "Green" })(Color || (Color = {}));
 //! ```
 //!
-//! The surrounding text (braces, whitespace, comments between members) is kept;
-//! only the keyword, the name and the members are rewritten, so the output
-//! length may differ from the input. `const enum` is expanded the same way so
-//! that untouched use sites (`CE.A`) keep resolving at runtime.
+//! This module emits each declaration's IIFE — folding initializers
+//! through [`super::enum_fold`]/[`super::enum_fold_string`] and qualifying
+//! member references through [`super::enum_qualify`], over the group
+//! tables [`super::enum_collect`] gathered. The surrounding text (braces,
+//! whitespace, comments between members) is kept; only the keyword, the
+//! name and the members are rewritten, so the output length may differ
+//! from the input. `const enum` is expanded the same way so that
+//! untouched use sites (`CE.A`) keep resolving at runtime.
 
-use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use oxc_ast::AstKind;
 use oxc_ast::ast::*;
 use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
-use super::walk::{Walker, unit_at};
+use super::enum_fold_string::is_string_typed;
+use super::enum_model::MemberValue;
+use super::enum_model::{DeclarationMembers, enum_group_scope, is_block_scoped};
+use super::enum_number::js_number_to_string;
+use super::enum_qualify::{QualifyContext, QualifyState, qualify_expr};
+use super::enum_text::{json_quote, json_quote_utf16, string_literal_value_units};
+use super::walk::{Walker, expr_index};
 
-/// Expand `enum`/`const enum` in place.
 pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
+    let enum_index = node.node_id.get().index() as u32;
     let enum_name = node.id.name.as_str().to_string();
+    let declaration_start = node.span().start;
+    let key = (enum_group_scope(w, enum_index), enum_name.clone());
+    let entry = w.enum_members.get(&key);
+
+    // `let` for enums directly inside a block, function body, namespace or
+    // catch clause — any container but the program — so a shadowing enum
+    // cannot clobber the outer binding through var hoisting; `var` at
+    // program scope. Mirrors the TypeScript emitter.
+    let keyword = if is_block_scoped(w, enum_index) {
+        "let "
+    } else {
+        "var "
+    };
+
+    // TypeScript exports a merged enum once: only the group's first
+    // exported declaration keeps its `export` keyword, and only the
+    // group's first declaration emits the binding.
+    let exported = matches!(
+        w.node_kind(w.parent_of(enum_index)),
+        AstKind::ExportDeclaration(_)
+    );
+    let carries_export =
+        exported && entry.and_then(|members| members.first_export_start) == Some(declaration_start);
+    let is_first_declaration =
+        entry.and_then(|members| members.first_declaration_start) == Some(declaration_start);
 
     // `enum` keyword — for `const enum` the node span starts at `const`, which
     // is erased together with the keyword.
     let first = w.blanker.tokens.token_from(node.span().start);
-    let keyword = match first {
+    let keyword_token = match first {
         Some(token) if token.kind() == Kind::Const => w.blanker.tokens.token_from(token.span().end),
         other => other,
     };
-    let Some(keyword_token) = keyword.filter(|token| token.kind() == Kind::Enum) else {
+    let Some(keyword_token) = keyword_token.filter(|token| token.kind() == Kind::Enum) else {
         w.blanker.report("TSEnumDeclaration", node.span());
         return;
     };
-    w.blanker
-        .output
-        .override_range(node.span().start, keyword_token.span().end, "var ");
-    w.blanker.output.override_range(
-        node.id.span().start,
-        node.id.span().end,
-        format!("{enum_name}; (function ({enum_name})"),
-    );
 
-    // Numeric constant of the previous member for auto-increment, plus every
-    // member seen so far for qualifying references in member initializers.
-    let mut previous: Option<f64> = Some(-1.0);
-    let mut constants: HashMap<String, f64> = HashMap::new();
-    let mut member_names: HashSet<String> = HashSet::new();
+    if is_first_declaration {
+        w.blanker
+            .output
+            .override_range(node.span().start, keyword_token.span().end, keyword);
+        w.blanker.output.override_range(
+            node.id.span().start,
+            node.id.span().end,
+            format!("{enum_name}; (function ({enum_name})"),
+        );
+    } else if carries_export {
+        // a later exported declaration in a group whose export landed here:
+        // emit the binding with this declaration's `export` keyword
+        w.blanker
+            .output
+            .override_range(node.span().start, keyword_token.span().end, "var ");
+        w.blanker.output.override_range(
+            node.id.span().start,
+            node.id.span().end,
+            format!("{enum_name}; (function ({enum_name})"),
+        );
+    } else {
+        // a later declaration appends only its members: the binding (and
+        // its export, if any) belong to an earlier declaration
+        let head_start = if exported {
+            w.node_kind(w.parent_of(enum_index)).span().start
+        } else {
+            node.span().start
+        };
+        w.blanker
+            .output
+            .override_range(head_start, node.id.span().start, "");
+        // ASI protection: the appended IIFE starts with `(`, which would
+        // continue a preceding statement that lacks a trailing semicolon
+        // (`const x = 1 (function ...) ...`) — a leading `;` starts a fresh
+        // statement, the same guard erased statements emit
+        let separator = if w.blanker.semicolon_needed { ";" } else { "" };
+        w.blanker.output.override_range(
+            node.id.span().start,
+            node.id.span().end,
+            format!("{separator} (function ({enum_name})"),
+        );
+    }
 
-    for member in &node.body.members {
-        let member_span = member.span();
-        let member_name = member_name_of(w, member);
+    // Member emission reads the folds the collection pass decided (see
+    // [`super::enum_collect::MemberFold`]) — only the runtime branch
+    // re-walks its initializer, erasing TS syntax and qualifying member
+    // references. The group table is shared through the walker's `Rc`
+    // (cheap refcount, no per-declaration deep clone); this declaration's
+    // members resolve through it — earlier declarations of the same enum
+    // merged into it already.
+    // each declaration emits once: take its records instead of cloning
+    let records = w.enum_folds.remove(&enum_index).unwrap_or_default();
+    // clones of the shared tables keep the mutable walk below free of
+    // borrows on `w`
+    let enum_table = Rc::clone(&w.enum_members);
+    let const_bindings = Rc::clone(&w.const_bindings);
+    let declaration = DeclarationMembers {
+        shared: enum_table.get(&key),
+        // qualification only checks membership, never values
+        shared_group: None,
+        ..Default::default()
+    };
+
+    for (member, record) in node.body.members.iter().zip(records) {
+        let member_span = member.span;
         let key = member_key(w, member);
         let initializer = member.initializer.as_ref();
-        let constant = initializer.and_then(|init| eval_constant(init, &constants, &member_name));
 
-        if let Some(Expression::StringLiteral(literal)) = initializer {
-            // String-valued members emit a plain property assignment without
-            // reverse mapping (TypeScript emitter shape). The raw value text
-            // comes from the original code units on the UTF-16 path — the
-            // lossy parse copy would corrupt raw lone surrogates.
-            let raw_units = w.original_span_units(literal.span);
-            w.blanker.output.override_range_units(
-                member_span.start,
-                member_span.end,
-                &format!("{enum_name}[{key}] = "),
-                &raw_units,
-            );
-            previous = None;
-        } else if let Some(value) = constant {
-            // Constant initializers are emitted as the computed value.
-            constants.insert(member_name.clone(), value);
-            previous = Some(value);
-            w.blanker.output.override_range(
-                member_span.start,
-                member_span.end,
-                format!(
-                    "{enum_name}[{enum_name}[{key}] = {}] = {key}",
-                    js_number_to_string(value)
-                ),
-            );
-        } else if let Some(init) = initializer {
-            // Non-constant initializer: keep its source text, qualifying bare
-            // references to sibling members with the enum name.
-            previous = None;
-            w.blanker.output.override_range(
-                member_span.start,
-                init.span().start,
-                format!("{enum_name}[{enum_name}[{key}] = "),
-            );
-            qualify_expr(w, init, &enum_name, &member_names);
-            w.blanker
-                .output
-                .override_range(init.span().end, member_span.end, format!("] = {key}"));
-        } else if let Some(value) = previous {
-            let value = value + 1.0;
-            constants.insert(member_name.clone(), value);
-            previous = Some(value);
-            w.blanker.output.override_range(
-                member_span.start,
-                member_span.end,
-                format!(
-                    "{enum_name}[{enum_name}[{key}] = {}] = {key}",
-                    js_number_to_string(value)
-                ),
-            );
-        } else {
-            // Auto-increment after a non-computable member — the input is a
-            // TypeScript compile error; mirror tsc's `undefined` emit.
-            w.blanker.output.override_range(
-                member_span.start,
-                member_span.end,
-                format!("{enum_name}[{enum_name}[{key}] = undefined] = {key}"),
-            );
+        match record.fold {
+            Some(MemberValue::Str(value)) => {
+                // String-valued members emit a plain property assignment
+                // without reverse mapping when their type is a string
+                // literal (TypeScript emitter shape); the raw value text
+                // of a plain literal comes from the original code units on
+                // the UTF-16 path — the lossy parse copy would corrupt raw
+                // lone surrogates. A folded non-literal (asserted) string
+                // keeps the numeric reverse-mapping form.
+                if let Some(Expression::StringLiteral(literal)) = initializer {
+                    let raw_units = w.original_span_units(literal.span);
+                    w.blanker.output.override_range_units(
+                        member_span.start,
+                        member_span.end,
+                        &format!("{enum_name}[{key}] = "),
+                        &raw_units,
+                    );
+                } else {
+                    let folded = json_quote_utf16(&value.units);
+                    let shape = if value.literal {
+                        format!("{enum_name}[{key}] = {folded}")
+                    } else {
+                        format!("{enum_name}[{enum_name}[{key}] = {folded}] = {key}")
+                    };
+                    w.blanker
+                        .output
+                        .override_range(member_span.start, member_span.end, shape);
+                }
+            }
+            Some(MemberValue::Number(value)) => {
+                // Constant initializers are emitted as the computed value.
+                w.blanker.output.override_range(
+                    member_span.start,
+                    member_span.end,
+                    format!(
+                        "{enum_name}[{enum_name}[{key}] = {}] = {key}",
+                        js_number_to_string(value)
+                    ),
+                );
+            }
+            None if initializer.is_some() => {
+                // Non-constant initializer: erase TS-only syntax with the
+                // normal walk (its blanks land between the two member text
+                // overrides below), then qualify bare references to
+                // sibling members with the enum name — except references
+                // an inner scope binds. A string-typed initializer (a
+                // template, a concatenation) keeps the plain assignment
+                // shape — no reverse mapping over its runtime string
+                // result, like the TypeScript emitter.
+                let init = initializer.expect("checked is_some");
+                let string_typed = is_string_typed(init);
+                let head = if string_typed {
+                    format!("{enum_name}[{key}] = ")
+                } else {
+                    format!("{enum_name}[{enum_name}[{key}] = ")
+                };
+                w.blanker
+                    .output
+                    .override_range(member_span.start, init.span().start, head);
+                w.visit_node(expr_index(init));
+                let mut state = QualifyState::default();
+                qualify_expr(
+                    &QualifyContext {
+                        w,
+                        enum_name: &enum_name,
+                        self_member: &record.name,
+                        members: &declaration,
+                        bindings: &const_bindings,
+                        group_key: (enum_group_scope(w, enum_index), enum_name.clone()),
+                    },
+                    init,
+                    &mut state,
+                );
+                for (start, end, text) in state.edits {
+                    w.blanker.output.override_range_sorted(start, end, text);
+                }
+                let tail = if string_typed {
+                    String::new()
+                } else {
+                    format!("] = {key}")
+                };
+                w.blanker
+                    .output
+                    .override_range(init.span().end, member_span.end, tail);
+            }
+            None => {
+                // Auto-increment after a non-computable member — the input
+                // is a TypeScript compile error; mirror tsc's `undefined`
+                // emit.
+                w.blanker.output.override_range(
+                    member_span.start,
+                    member_span.end,
+                    format!("{enum_name}[{enum_name}[{key}] = undefined] = {key}"),
+                );
+            }
         }
 
-        member_names.insert(member_name);
         if let Some(comma) = w.blanker.tokens.token_from(member_span.end)
             && comma.kind() == Kind::Comma
         {
@@ -137,565 +256,25 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     );
 }
 
-/// Unquoted member name, used for the constants map and sibling-reference
-/// qualification (the decoded `String(id.value)`).
-fn member_name_of(w: &Walker<'_>, member: &TSEnumMember<'_>) -> String {
-    match &member.id {
-        TSEnumMemberName::Identifier(id) => id.name.as_str().to_string(),
-        TSEnumMemberName::String(literal) | TSEnumMemberName::ComputedString(literal) => {
-            literal.value.as_str().to_string()
-        }
-        // invalid TS (computed template); keep the raw text
-        TSEnumMemberName::ComputedTemplateString(template) => {
-            w.src[template.span().start as usize..template.span().end as usize].to_string()
-        }
-    }
-}
-
 /// The quoted enum property key (`JSON.stringify(memberName)` shape). The
 /// member name is decoded from the raw literal source — not the AST's lossy
 /// `value` string, which replaces lone-surrogate escapes with U+FFFD — as
 /// UTF-16 code units, so escaped lone surrogates (`"\uD800"`) re-emit exactly
 /// like `JSON.stringify` does: lowercase `\udXXXX`.
 fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
+    let source = super::enum_text::SourceText {
+        src: w.src,
+        units: w.units,
+        byte_to_unit: w.byte_to_unit,
+    };
     match &member.id {
         TSEnumMemberName::Identifier(id) => json_quote(id.name.as_str()),
         TSEnumMemberName::String(literal) | TSEnumMemberName::ComputedString(literal) => {
-            let span = literal.span;
-            let inner_start = span.start + 1;
-            let inner_end = span.end - 1;
-            let units: Vec<u16> = match (&w.units, &w.byte_to_unit) {
-                (Some(units), Some(byte_to_unit)) => {
-                    // decode from the original code units, which preserve raw
-                    // lone surrogates losslessly
-                    let u0 = unit_at(byte_to_unit, inner_start);
-                    let u1 = unit_at(byte_to_unit, inner_end);
-                    decode_units(&units[u0 as usize..u1 as usize])
-                }
-                _ => {
-                    let units: Vec<u16> = w.src[inner_start as usize..inner_end as usize]
-                        .chars()
-                        .flat_map(|c| {
-                            let mut buf = [0u16; 2];
-                            let encoded = c.encode_utf16(&mut buf);
-                            encoded.to_vec()
-                        })
-                        .collect();
-                    decode_units(&units)
-                }
-            };
-            json_quote_utf16(&units)
+            json_quote_utf16(&string_literal_value_units(&source, literal))
         }
         TSEnumMemberName::ComputedTemplateString(template) => {
             // raw span text, quoted like any other name
             json_quote(&w.src[template.span().start as usize..template.span().end as usize])
         }
-    }
-}
-
-/// Decode JS string-literal escape sequences over UTF-16 code units. Lone
-/// surrogates (from `\uD800`-style escapes or raw units on the UTF-16 path)
-/// are preserved as individual units.
-fn decode_units(units: &[u16]) -> Vec<u16> {
-    let mut out = Vec::with_capacity(units.len());
-    let mut i = 0usize;
-    while i < units.len() {
-        let unit = units[i];
-        if unit != 0x5C {
-            out.push(unit);
-            i += 1;
-            continue;
-        }
-        i += 1;
-        let Some(&escape) = units.get(i) else {
-            out.push(0x5C);
-            break;
-        };
-        i += 1;
-        match escape {
-            0x0A | 0x0D | 0x2028 | 0x2029 => {
-                // line continuation; a CR/LF pair is consumed together
-                if escape == 0x0D && units.get(i) == Some(&0x0A) {
-                    i += 1;
-                }
-            }
-            0x62 => out.push(0x08),
-            0x74 => out.push(0x09),
-            0x6E => out.push(0x0A),
-            0x76 => out.push(0x0B),
-            0x66 => out.push(0x0C),
-            0x72 => out.push(0x0D),
-            0x78 => {
-                let value = hex_value(units, i, 2);
-                if let Some((value, consumed)) = value {
-                    out.push(value as u16);
-                    i += consumed;
-                } else {
-                    out.push(0x78);
-                }
-            }
-            0x75 => {
-                if units.get(i) == Some(&0x7B) {
-                    // \u{HexDigits}
-                    let mut j = i + 1;
-                    let mut value: u32 = 0;
-                    while let Some(&digit) = units.get(j) {
-                        let d = hex_digit(digit);
-                        match d {
-                            Some(d) if value <= 0x10FFFF => value = value * 16 + d as u32,
-                            _ => break,
-                        }
-                        j += 1;
-                    }
-                    if units.get(j) == Some(&0x7D) && value <= 0x10FFFF {
-                        // lone surrogates stay as single units and get
-                        // re-escaped by json_quote_utf16
-                        if (0xD800..=0xDFFF).contains(&value) {
-                            out.push(value as u16);
-                        } else {
-                            let mut buf = [0u16; 2];
-                            let encoded = char::from_u32(value).unwrap().encode_utf16(&mut buf);
-                            out.extend(encoded.iter().copied());
-                        }
-                        i = j + 1;
-                    } else {
-                        out.push(0x75);
-                    }
-                } else {
-                    let value = hex_value(units, i, 4);
-                    if let Some((value, consumed)) = value {
-                        out.push(value as u16);
-                        i += consumed;
-                    } else {
-                        out.push(0x75);
-                    }
-                }
-            }
-            0x30..=0x37 => {
-                // Annex B legacy octal: digits starting 0-3 consume up to two
-                // more octal digits, digits starting 4-7 up to one
-                let first = escape - 0x30;
-                let max_extra = if first <= 3 { 2 } else { 1 };
-                let mut value = first;
-                let mut count = 1usize;
-                while count <= max_extra
-                    && let Some(&digit) = units.get(i)
-                    && (0x30..=0x37).contains(&digit)
-                {
-                    value = value * 8 + (digit - 0x30);
-                    i += 1;
-                    count += 1;
-                }
-                out.push(value);
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-fn hex_digit(unit: u16) -> Option<u16> {
-    match unit {
-        0x30..=0x39 => Some(unit - 0x30),
-        0x41..=0x46 => Some(unit - 0x37),
-        0x61..=0x66 => Some(unit - 0x57),
-        _ => None,
-    }
-}
-
-fn hex_value(units: &[u16], start: usize, count: usize) -> Option<(u32, usize)> {
-    let mut value: u32 = 0;
-    for offset in 0..count {
-        let digit = hex_digit(*units.get(start + offset)?)?;
-        value = value * 16 + digit as u32;
-    }
-    Some((value, count))
-}
-
-/// `JSON.stringify` over UTF-16 code units: well-formed output — lone
-/// surrogates are escaped as lowercase `\udXXX`, surrogate pairs become the
-/// astral character, controls use the short forms.
-fn json_quote_utf16(units: &[u16]) -> String {
-    let mut out = String::from("\"");
-    let mut i = 0usize;
-    while i < units.len() {
-        let unit = units[i];
-        match unit {
-            0x22 => out.push_str("\\\""),
-            0x5C => out.push_str("\\\\"),
-            0x08 => out.push_str("\\b"),
-            0x09 => out.push_str("\\t"),
-            0x0A => out.push_str("\\n"),
-            0x0C => out.push_str("\\f"),
-            0x0D => out.push_str("\\r"),
-            0x00..=0x1F => out.push_str(&format!("\\u{:04x}", unit)),
-            0xD800..=0xDBFF => {
-                let next = units.get(i + 1).copied();
-                if matches!(next, Some(low) if (0xDC00..=0xDFFF).contains(&low)) {
-                    let code = 0x10000
-                        + (((unit - 0xD800) as u32) << 10)
-                        + (next.unwrap() - 0xDC00) as u32;
-                    out.push(char::from_u32(code).expect("valid astral char"));
-                    i += 1;
-                } else {
-                    out.push_str(&format!("\\u{:04x}", unit));
-                }
-            }
-            0xDC00..=0xDFFF => out.push_str(&format!("\\u{:04x}", unit)),
-            _ => out.push(char::from_u32(unit as u32).expect("BMP char")),
-        }
-        i += 1;
-    }
-    out.push('"');
-    out
-}
-
-/// `JSON.stringify` of a JS string, used for the quoted member key text.
-fn json_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// `String(value)` — the JS `Number::toString` algorithm.
-///
-/// Shortest round-trip digits come from `dtoa` (the double-conversion
-/// algorithm V8 also uses). Shortest digits are not always unique: when the
-/// value lies exactly halfway between two same-length decimals, ECMAScript
-/// mandates the candidate with an even digit string ("round half to even")
-/// while the generation algorithms round half away from zero — the source of
-/// the `1381472817847324.2` vs `.3` divergence. Exact ties are detected with
-/// integer arithmetic on the value's binary decomposition (|v| = odd m x 2^e:
-/// a tie at decimal shift d = n - k exists iff d == e + 1, m is odd, and
-/// 5^(-d) divides m when d < 0), and the digits are bumped to their even
-/// neighbor. The digits are then laid out per the ECMAScript specification
-/// (decimal form for -6 < n <= 21, exponential otherwise).
-fn js_number_to_string(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value < 0.0 { "-Infinity" } else { "Infinity" }.to_string();
-    }
-    if value == 0.0 {
-        return "0".to_string();
-    }
-
-    let negative = value.is_sign_negative();
-    let magnitude = value.abs();
-
-    // shortest round-trip digits of |value|, as d = n - k in |value| = s x 10^d
-    let scientific = format!("{magnitude:e}");
-    let (mantissa, exponent) = scientific.split_once('e').expect("LowerExp form");
-    let exponent: i32 = exponent.parse().expect("decimal exponent");
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-    let digits = digits.trim_end_matches('0');
-    let mut digits_int: u64 = digits.parse().expect("shortest digits fit u64");
-    let d = exponent - (digits.len() as i32 - 1);
-
-    // round half to even (ECMAScript) instead of half away from zero
-    if digits_int % 2 == 1 && is_exact_tie(magnitude, d) {
-        digits_int = tie_partner(magnitude, digits_int, d);
-    }
-
-    let negative_prefix = if negative { "-" } else { "" };
-    let layout = layout_digits(digits_int, d);
-    format!("{negative_prefix}{layout}")
-}
-
-/// Lay the decimal digits out per ECMAScript: `|value| = digits x 10^(-d)`
-/// with the digit count folded into n = k + d.
-fn layout_digits(digits_int: u64, d: i32) -> String {
-    let digits = digits_int.to_string();
-    let k = digits.len() as i32;
-    let n = k + d;
-
-    if -6 < n && n <= 21 {
-        if n >= k {
-            let mut out = digits;
-            for _ in 0..(n - k) {
-                out.push('0');
-            }
-            return out;
-        }
-        if n > 0 {
-            let mut out = String::new();
-            out.push_str(&digits[..n as usize]);
-            out.push('.');
-            out.push_str(&digits[n as usize..]);
-            return out;
-        }
-        let mut out = String::from("0.");
-        for _ in 0..(-n) {
-            out.push('0');
-        }
-        out.push_str(&digits);
-        return out;
-    }
-
-    // exponential form: d[.ddd]e(+|-)x
-    let mut out = String::new();
-    out.push_str(&digits[..1]);
-    if k > 1 {
-        out.push('.');
-        out.push_str(&digits[1..]);
-    }
-    out.push('e');
-    let exponent = n - 1;
-    out.push(if exponent < 0 { '-' } else { '+' });
-    out.push_str(&exponent.abs().to_string());
-    out
-}
-
-/// The even tie partner of the odd shortest digits `digits` (which the
-/// generation algorithm rounded half away from zero). Within a tie,
-/// |v| x 10^(-d) = digits +- 0.5, i.e. |v| x 2 x 10^(-d) = m x 5^(-d) (the
-/// tie condition collapses the power of two to zero); comparing that odd
-/// integer with 2 x digits picks the direction.
-fn tie_partner(v: f64, digits: u64, d: i32) -> u64 {
-    let (m, _) = odd_decomposition(v);
-    let scaled_times_two: u128 = if d <= 0 {
-        let mut pow5: u128 = 1;
-        let cap: u128 = 2 * digits as u128 + 1;
-        for _ in 0..(-d) {
-            pow5 *= 5;
-            if pow5 > cap {
-                break;
-            }
-        }
-        (m as u128) * pow5
-    } else {
-        (m / 5u64.pow(d as u32)) as u128
-    };
-    if scaled_times_two > 2 * digits as u128 {
-        digits + 1
-    } else {
-        digits - 1
-    }
-}
-
-/// Exact binary decomposition of a finite positive double: |v| = m x 2^e with
-/// m odd. Returns (m, e).
-fn odd_decomposition(v: f64) -> (u64, i32) {
-    let bits = v.to_bits();
-    let biased = ((bits >> 52) & 0x7ff) as i32;
-    let fraction = bits & 0xf_ffff_ffff_ffff;
-    let (mut m, mut e) = if biased == 0 {
-        (fraction, -1074)
-    } else {
-        (fraction | (1 << 52), biased - 1075)
-    };
-    while m % 2 == 0 {
-        m /= 2;
-        e += 1;
-    }
-    (m, e)
-}
-
-/// Whether |v| = digits x 10^d lies exactly halfway between
-/// (digits - 1) x 10^d and (digits + 1) x 10^d, i.e. whether
-/// |v| x 2 x 10^d is an odd integer (then the two neighbors are equally
-/// close). Requires `digits` to be the shortest round-trip digits of `|v|`.
-fn is_exact_tie(v: f64, d: i32) -> bool {
-    let (m, e) = odd_decomposition(v);
-    // |v| x 2 x 10^(-d) = m x 2^(e + 1 - d) x 5^(-d) — an odd integer
-    // requires the power of two to vanish, an odd mantissa, and no 5s in the
-    // denominator.
-    if e + 1 - d != 0 || m % 2 == 0 {
-        return false;
-    }
-    if d > 0 {
-        // 5^d must divide m (m <= 2^53 bounds the loop to ~23 steps)
-        let mut power = 5u64;
-        let mut count = 1u32;
-        while count < d as u32 {
-            match power.checked_mul(5) {
-                Some(p) if p <= m => power = p,
-                _ => return false,
-            }
-            count += 1;
-        }
-        return m % power == 0;
-    }
-    true
-}
-
-fn to_int32(value: f64) -> i32 {
-    if !value.is_finite() {
-        return 0;
-    }
-    let truncated = value.trunc();
-    let modulo = truncated.rem_euclid(4_294_967_296.0);
-    if modulo >= 2_147_483_648.0 {
-        (modulo - 4_294_967_296.0) as i32
-    } else {
-        modulo as i32
-    }
-}
-
-fn to_uint32(value: f64) -> u32 {
-    if !value.is_finite() {
-        return 0;
-    }
-    value.trunc().rem_euclid(4_294_967_296.0) as u32
-}
-
-/// Constant-fold an initializer for the auto-increment chain (JS semantics:
-/// all arithmetic happens on f64, bitwise operators go through ToInt32).
-fn eval_constant(
-    expr: &Expression<'_>,
-    constants: &HashMap<String, f64>,
-    self_name: &str,
-) -> Option<f64> {
-    use BinaryOperator as B;
-    use Expression as E;
-    match expr {
-        E::NumericLiteral(literal) => Some(literal.value),
-        E::StringLiteral(_) => None,
-        E::Identifier(identifier) => {
-            if identifier.name.as_str() == self_name {
-                None
-            } else {
-                constants.get(identifier.name.as_str()).copied()
-            }
-        }
-        E::ParenthesizedExpression(paren) => eval_constant(&paren.expression, constants, self_name),
-        E::UnaryExpression(unary) => {
-            let value = eval_constant(&unary.argument, constants, self_name)?;
-            match unary.operator {
-                UnaryOperator::UnaryNegation => Some(-value),
-                UnaryOperator::UnaryPlus => Some(value),
-                UnaryOperator::BitwiseNot => Some(!to_int32(value) as f64),
-                _ => None,
-            }
-        }
-        E::BinaryExpression(binary) => {
-            let l = eval_constant(&binary.left, constants, self_name)?;
-            let r = eval_constant(&binary.right, constants, self_name)?;
-            let result = match binary.operator {
-                B::Addition => l + r,
-                B::Subtraction => l - r,
-                B::Multiplication => l * r,
-                B::Division => l / r,
-                B::Remainder => l % r,
-                B::Exponential => {
-                    // JS: x ** Infinity is NaN for |x| == 1.
-                    if r.is_infinite() && l.abs() == 1.0 {
-                        f64::NAN
-                    } else {
-                        l.powf(r)
-                    }
-                }
-                B::ShiftLeft => to_int32(l).wrapping_shl(to_uint32(r)) as f64,
-                B::ShiftRight => (to_int32(l) >> (to_uint32(r) % 32)) as f64,
-                B::ShiftRightZeroFill => (to_uint32(l) >> (to_uint32(r) % 32)) as f64,
-                B::BitwiseOR => (to_int32(l) | to_int32(r)) as f64,
-                B::BitwiseXOR => (to_int32(l) ^ to_int32(r)) as f64,
-                B::BitwiseAnd => (to_int32(l) & to_int32(r)) as f64,
-                _ => return None,
-            };
-            Some(result)
-        }
-        _ => None,
-    }
-}
-
-/// Rewrite bare references to this enum's members inside a non-constant
-/// initializer (`B = A + f()` → `B = E.A + f()`): inside the IIFE only the
-/// enum binding itself is in scope. `qualify_expr` is the entry point;
-/// `qualify_index` recurses over the flat tree.
-fn qualify_expr(
-    w: &mut Walker<'_>,
-    expr: &Expression<'_>,
-    enum_name: &str,
-    member_names: &HashSet<String>,
-) {
-    let start = AstKind::from_expression(expr).node_id().index() as u32;
-    qualify_index(w, start, enum_name, member_names);
-}
-
-fn qualify_index(w: &mut Walker<'_>, idx: u32, enum_name: &str, member_names: &HashSet<String>) {
-    let kind = w.node_kind(idx);
-    match kind {
-        AstKind::IdentifierReference(identifier) => {
-            if member_names.contains(identifier.name.as_str()) {
-                w.blanker.output.override_range(
-                    identifier.span().start,
-                    identifier.span().end,
-                    format!("{enum_name}.{}", identifier.name),
-                );
-            }
-        }
-        // Property access: only the object (and computed keys) are value
-        // positions; the static property name is never a reference.
-        AstKind::ComputedMemberExpression(member) => {
-            qualify_expr(w, &member.object, enum_name, member_names);
-            qualify_expr(w, &member.expression, enum_name, member_names);
-        }
-        AstKind::StaticMemberExpression(member) => {
-            qualify_expr(w, &member.object, enum_name, member_names);
-        }
-        AstKind::PrivateFieldExpression(member) => {
-            qualify_expr(w, &member.object, enum_name, member_names);
-        }
-        // Object literal properties: computed keys and values are value
-        // positions; static keys are not.
-        AstKind::ObjectProperty(property) => {
-            if property.computed
-                && let Some(key_index) = w.child_with_span(idx, property.key.span())
-            {
-                qualify_index(w, key_index, enum_name, member_names);
-            }
-            qualify_expr(w, &property.value, enum_name, member_names);
-        }
-        _ => {
-            for child in w.children_of(idx).collect::<Vec<_>>() {
-                qualify_index(w, child, enum_name, member_names);
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn js_number_formatting() {
-        assert_eq!(js_number_to_string(0.0), "0");
-        assert_eq!(js_number_to_string(5.0), "5");
-        assert_eq!(js_number_to_string(-1.0), "-1");
-        assert_eq!(js_number_to_string(1.5), "1.5");
-        // shortest round-trip digits, not the exact binary value
-        assert_eq!(
-            js_number_to_string(1000000000000000128.0),
-            "1000000000000000100"
-        );
-        assert_eq!(js_number_to_string(1e20), "100000000000000000000");
-        assert_eq!(js_number_to_string(1e21), "1e+21");
-        assert_eq!(js_number_to_string(1e-6), "0.000001");
-        assert_eq!(js_number_to_string(1e-7), "1e-7");
-        // exact tie: the even candidate wins (1381472817847324.25 sits
-        // exactly halfway between ...324.2 and ...324.3)
-        assert_eq!(
-            js_number_to_string(1381472817847324.2),
-            "1381472817847324.2"
-        );
     }
 }
