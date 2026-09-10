@@ -19,13 +19,15 @@ console.log(await transpile(`const a: number = 1`))
 // result: `const a         = 1`
 ```
 
-`transpileSync` offers the same behavior synchronously, and
-`petrea/browser` exposes the identical API for browsers via a
-WebAssembly build (shipped as the `@petrea/binding-wasm32-wasip1` package,
-installed alongside the platform bindings as an optional dependency):
+`transpileSync` offers the same behavior synchronously. `transpile` works in
+Node and in browsers. In Node it runs on a native binding for the current
+platform; when bundled for the browser, bundlers resolve the same import to
+a WebAssembly build through the standard `browser` condition — no
+configuration needed. To force the WebAssembly build explicitly (e.g. in
+tooling without a `browser` condition), use the `petrea/wasm` entry:
 
 ```ts
-import { transpile } from 'petrea/browser'
+import { transpile } from 'petrea/wasm'
 
 await transpile(`const a: number = 1`)
 // 'const a         = 1'

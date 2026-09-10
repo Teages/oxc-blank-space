@@ -18,13 +18,15 @@ function loadWasmBinding(): NativeBinding {
 const api = createApi(loadWasmBinding)
 
 /**
- * Browser entry point: the same Rust pipeline compiled to WebAssembly
+ * WebAssembly entry point: the same Rust pipeline compiled to WebAssembly
  * (`wasm32-wasip1`), loaded through `@napi-rs/wasm-runtime` from the
  * `@petrea/binding-wasm32-wasip1` package. The API mirrors the main entry
- * exactly.
+ * exactly. Bundlers targeting browsers already resolve `petrea` to this
+ * build through the `browser` export condition; this explicit entry forces
+ * it everywhere else.
  *
  * ```
- * import { transpile } from 'petrea/browser'
+ * import { transpile } from 'petrea/wasm'
  *
  * await transpile(`const a: number = 1`)
  * // 'const a         = 1'

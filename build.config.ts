@@ -5,7 +5,7 @@ export default defineBuildConfig({
     { type: 'bundle', input: './src/index.ts', outDir: './dist' },
     {
       type: 'bundle',
-      input: './src/browser.ts',
+      input: './src/wasm.ts',
       outDir: './dist',
       rolldown: {
         // the default `node` platform pulls node builtins into the bundle,

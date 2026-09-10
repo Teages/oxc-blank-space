@@ -88,8 +88,8 @@ const api = createApi(loadNodeBinding)
 
 /**
  * Whether a native binding matching this platform was found. When false,
- * {@link transpile} and {@link transpileSync} throw on use and the browser
- * entry (`petrea/browser`) is the alternative.
+ * {@link transpile} and {@link transpileSync} throw on use and the
+ * WebAssembly build (`petrea/wasm`) is the alternative.
  */
 export const nativeBindingAvailable = api.isAvailable
 

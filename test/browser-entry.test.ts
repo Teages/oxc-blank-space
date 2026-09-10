@@ -1,9 +1,9 @@
-// Verifies the browser entry at both of its layers:
+// Verifies the WebAssembly build at both of its layers:
 //
-// 1. dist/browser.mjs — the published artifact. Node resolves its bare
-//    `@petrea/binding-wasm32-wasip1` import through the package's `default`
-//    export condition (the CJS loader), so this layer proves the wrapper and
-//    the dependency wiring, not the browser loading path itself.
+// 1. dist/wasm.mjs — the published `petrea/wasm` entry. Node resolves its
+//    bare `@petrea/binding-wasm32-wasip1` import through the package's
+//    `default` export condition (the CJS loader), so this layer proves the
+//    wrapper and the dependency wiring, not the browser loading path itself.
 // 2. npm/wasm32-wasip1/binding.wasip1-browser.js — the ESM loader bundlers
 //    select via the `browser` export condition. It instantiates the wasm
 //    module at import time through `globalThis.fetch`, which cannot read
@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const browserEntryPath = join(root, 'dist/browser.mjs')
+const browserEntryPath = join(root, 'dist/wasm.mjs')
 const browserLoaderPath = join(root, 'npm/wasm32-wasip1/binding.wasip1-browser.js')
 
 if (!existsSync(browserEntryPath)) {
@@ -55,7 +55,7 @@ const rawLoader = (await import(pathToFileURL(browserLoaderPath).href)) as {
 }
 
 // the loader exposes the raw napi surface; the public names are adapted by
-// src/browser.ts, mirrored here to reuse the same behavioral assertions
+// src/wasm.ts, mirrored here to reuse the same behavioral assertions
 const browserLoader: BrowserBinding = {
   transpile: (input, options) => rawLoader.transpileAsync(input, options).then(r => r.code),
   transpileSync: (input, options) => rawLoader.transpileNativeSync(input, options).code,
@@ -83,7 +83,7 @@ function assertBrowserBehavior(binding: BrowserBinding, label: string) {
   })
 }
 
-describe('browser entry (dist/browser.mjs)', () => {
+describe('wasm entry (dist/wasm.mjs)', () => {
   assertBrowserBehavior(browser, 'dist')
 
   // the SyntaxError wrapping is the public API layer's contract (src/api.ts)

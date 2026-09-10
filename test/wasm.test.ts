@@ -1,6 +1,6 @@
 // Behavioral checks for the wasm build of the Rust pipeline, loaded through
 // the Node-side wasm loader shipped in @petrea/binding-wasm32-wasip1. The
-// browser entry (dist/browser.mjs) imports the same package's ESM loader,
+// wasm entry (dist/wasm.mjs) imports the same package's ESM loader,
 // but that fetches over HTTP, so it is exercised separately through a fetch
 // shim (browser-entry.test.ts).
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
