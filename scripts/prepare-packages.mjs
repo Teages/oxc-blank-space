@@ -8,7 +8,7 @@ import { execSync } from 'node:child_process'
 // - npm/wasm32-wasip1/ — the checked-in manifest + the wasm artifacts
 // - optionalDependencies in the root package.json, pinning all nine to the
 //   root version so the batch publishes as one release
-import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -34,12 +34,28 @@ const wasmPkg = 'npm/wasm32-wasip1'
 function main() {
   const present = new Set(readdirSync(prebuilt))
 
+  // napi's create-npm-dirs reconciles npm/ against napi.targets and deletes
+  // any binding manifest it does not manage — including the wasm package's,
+  // whose artifacts are assembled by this script instead. Capture it before
+  // generation and restore it right after.
+  const wasmManifestPath = join(root, wasmPkg, 'package.json')
+  const wasmManifestSource = readFileSync(wasmManifestPath, 'utf8')
+
   // generate the per-platform manifests (reads the napi config from the root
   // package.json, so versions inside match the release)
   execSync(
     'pnpm exec napi create-npm-dirs --cwd . --package-json-path package.json --npm-dir npm',
     { cwd: root, stdio: 'inherit' },
   )
+
+  const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const wasmManifest = JSON.parse(wasmManifestSource)
+  wasmManifest.version = version
+  // when the wasm dir holds nothing else (a clean checkout without pnpm's
+  // per-package node_modules), create-npm-dirs removes the emptied directory
+  // along with the manifest
+  mkdirSync(dirname(wasmManifestPath), { recursive: true })
+  writeFileSync(wasmManifestPath, `${JSON.stringify(wasmManifest, null, 2)}\n`)
 
   for (const suffix of nativeSuffixes) {
     const file = `binding.${suffix}.node`
@@ -57,19 +73,11 @@ function main() {
     cpSync(join(prebuilt, file), join(root, wasmPkg, file))
   }
 
-  syncManifests()
+  syncManifests(wasmManifest)
   writeOptionalDependencies()
 }
 
-function syncManifests() {
-  // create-npm-dirs manages the native manifests; the wasm manifest is
-  // checked in (it keeps hand-maintained fields), so only align its version
-  const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-  const wasmManifestPath = join(root, wasmPkg, 'package.json')
-  const wasmManifest = JSON.parse(readFileSync(wasmManifestPath, 'utf8'))
-  wasmManifest.version = version
-  writeFileSync(wasmManifestPath, `${JSON.stringify(wasmManifest, null, 2)}\n`)
-
+function syncManifests(wasmManifest) {
   // every binding package must be complete before anything publishes
   const incomplete = []
   for (const suffix of nativeSuffixes) {
