@@ -46,6 +46,12 @@ jobs:
         run: pnpm prepare-packages
         env:
           NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
+      # prepare-packages intentionally mutates the root and wasm manifests;
+      # resync (non-frozen) so the deps-status check inside every later
+      # `pnpm` invocation doesn't hit the CI default frozen-lockfile install.
+      # Unpublished optional deps are skipped with a warning, not an error
+      - name: Resync lockfile with the assembled manifests
+        run: pnpm install --no-frozen-lockfile
       - name: Publish preview to pkg.pr.new
         # one call for the whole batch: the root package plus every binding
         # package dir, so cross-references become pkg.pr.new URLs

@@ -119,6 +119,12 @@ jobs:
         run: pnpm prepare-packages
         env:
           NAPI_PREBUILT_DIR: ${{ runner.temp }}/native-bindings
+      # prepare-packages mutates the root and wasm manifests; resync
+      # (non-frozen) or the deps-status check inside `pnpm build:js` — run by
+      # the root package's prepack — hits the CI default frozen install.
+      # Unpublished optional deps are skipped with a warning, not an error
+      - name: Resync lockfile with the assembled manifests
+        run: pnpm install --no-frozen-lockfile
       # a rerun after a partial failure must not collide with the versions
       # that already made it out. `npm view` only sees approved versions: a
       # version that is still staged makes staging conflict — reject or
