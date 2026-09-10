@@ -1,31 +1,40 @@
 import { execSync } from 'node:child_process'
-// Builds the Rust binding for wasm32-wasip1 into the `wasm/` staging dir,
-// keeping only the artifacts the package consumes: the .wasm module, the Node
-// loader (.wasip1.cjs) and the browser loader (.wasip1-browser.js). The
-// browser entry bundles the loader; `scripts/assemble-dist.mjs` copies the
-// rest into dist for shipping and testing.
-import { mkdirSync, readdirSync, rmSync } from 'node:fs'
+// Builds the Rust binding for wasm32-wasip1 into the `wasm/` staging dir and
+// copies the binding.* artifacts into the `@petrea/binding-wasm32-wasip1`
+// package dir (`npm/wasm32-wasip1`; the checked-in manifest makes it a
+// workspace package so local builds resolve). napi must never write into the
+// package dir directly: its output reconciliation deletes files it does not
+// manage, including package.json. Release CI copies the same files from the
+// prebuilt artifacts instead of rebuilding (see scripts/prepare-packages.mjs).
+import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const staging = join(root, 'wasm')
+const pkgDir = join(root, 'npm/wasm32-wasip1')
 
 rmSync(staging, { recursive: true, force: true })
 mkdirSync(staging, { recursive: true })
 
 execSync(
-  'pnpm exec napi build --platform --release --target wasm32-wasip1 --output-dir ../wasm',
-  { cwd: join(root, 'native'), stdio: 'inherit' },
+  'pnpm exec napi build --platform --release --target wasm32-wasip1'
+  + ' --manifest-path native/Cargo.toml'
+  + ' --output-dir wasm'
+  // required for WASI builds in a `"type": "module"` package: the CommonJS
+  // declaration must carry the .d.cts extension the manifest points at
+  + ' --dts binding.wasip1.d.cts',
+  { cwd: root, stdio: 'inherit' },
 )
 
-const keep = new Set([
-  'oxc-blank-space-native.wasm32-wasip1.wasm',
-  'oxc-blank-space-native.wasip1.cjs',
-  'oxc-blank-space-native.wasip1-browser.js',
-])
-for (const file of readdirSync(staging)) {
-  if (!keep.has(file)) {
-    rmSync(join(staging, file), { force: true })
-  }
+// the generic index/browser bindings and the debug-profile .wasm duplicate
+// are not part of the package
+const artifacts = readdirSync(staging).filter(
+  file => file.startsWith('binding.') && !file.endsWith('.debug.wasm'),
+)
+if (artifacts.length === 0) {
+  throw new Error('the wasm build produced no binding.* artifacts')
+}
+for (const file of artifacts) {
+  cpSync(join(staging, file), join(pkgDir, file))
 }

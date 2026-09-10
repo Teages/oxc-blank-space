@@ -1,0 +1,46 @@
+{
+  "name": "@petrea/binding-wasm32-wasip1",
+  "type": "module",
+  "version": "0.0.0",
+  "description": "WebAssembly binding for petrea (wasm32-wasip1)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Teages/petrea"
+  },
+  "exports": {
+    ".": {
+      "types": "./binding.wasip1.d.cts",
+      "browser": "./binding.wasip1-browser.js",
+      "require": "./binding.wasip1.cjs",
+      "default": "./binding.wasip1.cjs"
+    },
+    "./workerd": {
+      "types": "./binding.wasip1-deferred.d.ts",
+      "default": "./binding.wasip1-deferred.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "binding.wasip1.cjs",
+  "types": "binding.wasip1.d.cts",
+  "files": [
+    "binding.wasip1-browser.js",
+    "binding.wasip1-deferred.d.ts",
+    "binding.wasip1-deferred.js",
+    "binding.wasip1.cjs",
+    "binding.wasip1.d.cts",
+    "binding.wasm32-wasip1.wasm"
+  ],
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=23.5.0"
+  },
+  "browser": "binding.wasip1-browser.js",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@emnapi/core": "2.0.0-alpha.5",
+    "@emnapi/runtime": "2.0.0-alpha.5",
+    "@napi-rs/wasm-runtime": "~1.2.3"
+  }
+}

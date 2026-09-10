@@ -11,6 +11,7 @@ shellEmulator: true
 
 packages:
   - playground
+  - npm/wasm32-wasip1
 
 allowBuilds:
   esbuild: true
