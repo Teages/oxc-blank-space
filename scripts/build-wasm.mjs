@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process'
 // package dir directly: its output reconciliation deletes files it does not
 // manage, including package.json. Release CI copies the same files from the
 // prebuilt artifacts instead of rebuilding (see scripts/prepare-packages.mjs).
-import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -38,3 +38,11 @@ if (artifacts.length === 0) {
 for (const file of artifacts) {
   cpSync(join(staging, file), join(pkgDir, file))
 }
+
+// napi skips the raw-module declaration when an explicit --dts path is set;
+// the ./wasm export needs it. Bundler asset imports resolve to the module's
+// URL string, so that is the declared contract.
+writeFileSync(
+  join(pkgDir, 'binding.wasm32-wasip1.wasm.d.ts'),
+  'declare const wasmUrl: string;\nexport default wasmUrl;\n',
+)
