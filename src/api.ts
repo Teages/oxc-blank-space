@@ -107,7 +107,7 @@ export function createApi(load: () => NativeBinding | undefined): {
   function requireBinding(): NativeBinding {
     if (!binding) {
       throw new Error(
-        '@teages/oxc-blank-space: no usable transpiler binding for this runtime. Run `pnpm build` first, or import `@teages/oxc-blank-space/browser` in browser environments.',
+        'petrea: no usable transpiler binding for this runtime. Run `pnpm build` first, or import `petrea/wasm` in browser environments.',
         { cause: loadError },
       )
     }
@@ -122,7 +122,7 @@ export function createApi(load: () => NativeBinding | undefined): {
    * Rejects with a `SyntaxError` when the input cannot be parsed.
    *
    * ```
-   * import { transpile } from '@teages/oxc-blank-space'
+   * import { transpile } from 'petrea'
    *
    * await transpile(`const a: number = 1`)
    * // 'const a         = 1'

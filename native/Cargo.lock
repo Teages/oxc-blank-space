@@ -317,23 +317,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxc-blank-space-native"
-version = "0.2.0"
-dependencies = [
- "dtoa",
- "napi",
- "napi-build",
- "napi-derive",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_diagnostics",
- "oxc_parser",
- "oxc_span",
- "oxc_syntax",
-]
-
-[[package]]
 name = "oxc_allocator"
 version = "0.148.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -534,6 +517,23 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "petrea-binding"
+version = "0.3.0"
+dependencies = [
+ "dtoa",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_diagnostics",
+ "oxc_parser",
+ "oxc_span",
+ "oxc_syntax",
+]
 
 [[package]]
 name = "phf"

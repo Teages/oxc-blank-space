@@ -1,7 +1,7 @@
 // Standalone smoke test for a built native binding, runnable on any target
 // platform (including inside docker images) with no repo dependencies:
 //
-//   node scripts/smoke-native.mjs dist/oxc-blank-space-native.linux-x64-gnu.node
+//   node scripts/smoke-native.mjs dist/binding.linux-x64-gnu.node
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import process from 'node:process'

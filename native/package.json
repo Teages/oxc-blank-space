@@ -1,8 +1,0 @@
-{
-  "name": "@teages/oxc-blank-space-native",
-  "version": "0.0.0",
-  "private": true,
-  "napi": {
-    "binaryName": "oxc-blank-space-native"
-  }
-}

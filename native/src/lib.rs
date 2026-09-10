@@ -1,4 +1,4 @@
-//! Native Rust implementation of `@teages/oxc-blank-space`.
+//! Native Rust implementation of `petrea`.
 //!
 //! Exposes the napi bindings used by the package's main and browser entries:
 //! parsing and blanking run on a background thread (napi `AsyncTask`) and

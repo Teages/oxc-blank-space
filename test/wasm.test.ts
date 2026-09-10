@@ -1,8 +1,8 @@
 // Behavioral checks for the wasm build of the Rust pipeline, loaded through
-// the shipped Node-side wasm loader (dist/wasm/*.wasip1.cjs). The browser
-// entry (dist/browser.mjs) bundles the same wasm module and runtime, but its
-// loader fetches over HTTP, so the ESM artifact itself is only smoke-checked
-// statically.
+// the Node-side wasm loader shipped in @petrea/binding-wasm32-wasip1. The
+// wasm entry (dist/wasm.mjs) imports the same package's ESM loader,
+// but that fetches over HTTP, so it is exercised separately through a fetch
+// shim (browser-entry.test.ts).
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { transpileSync } from '../src/index'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const wasmLoaderPath = join(root, 'dist/wasm/oxc-blank-space-native.wasip1.cjs')
+const wasmLoaderPath = join(root, 'npm/wasm32-wasip1/binding.wasip1.cjs')
 
 if (!existsSync(wasmLoaderPath)) {
   throw new Error('the wasm binding is missing; run `pnpm build` first')

@@ -1,31 +1,34 @@
 {
-  "name": "@teages/oxc-blank-space",
+  "name": "petrea",
   "type": "module",
   "version": "0.3.0",
   "packageManager": "pnpm@11.1.2",
   "description": "A type-stripper that blanks TypeScript-only syntax using the oxc parser, preserving line and column positions.",
   "license": "MIT",
-  "repository": "Teages/oxc-blank-space",
+  "repository": "Teages/petrea",
   "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
+      "browser": "./dist/wasm.mjs",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
     },
-    "./browser": {
-      "types": "./dist/browser.d.mts",
-      "import": "./dist/browser.mjs"
+    "./wasm": {
+      "types": "./dist/wasm.d.mts",
+      "default": "./dist/wasm.mjs"
     }
   },
   "module": "./dist/index.mjs",
+  "browser": "./dist/wasm.mjs",
   "types": "./dist/index.d.mts",
   "typesVersions": {
     "*": {
       ".": [
         "./dist/index.d.mts"
       ],
-      "browser": [
-        "./dist/browser.d.mts"
+      "wasm": [
+        "./dist/wasm.d.mts"
       ]
     }
   },
@@ -36,19 +39,34 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "node scripts/assemble-dist.mjs",
-    "build:native": "cd native && napi build --platform --release --output-dir ../binaries",
+    "build": "pnpm build:native && pnpm build:wasm && pnpm build:js",
+    "build:native": "napi build --platform --release --manifest-path native/Cargo.toml --output-dir binaries",
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:js": "obuild",
+    "prepare-packages": "node scripts/prepare-packages.mjs",
     "play:prepare": "obuild --stub",
     "play": "pnpm -C playground play",
     "dev": "vitest dev",
     "lint": "eslint --cache .",
     "lint:fix": "eslint --cache --fix .",
-    "prepack": "pnpm build",
+    "prepack": "pnpm build:js",
     "test": "pnpm lint && pnpm test:types && vitest run --coverage",
     "test:types": "tsc --noEmit --skipLibCheck",
     "bench": "vitest bench --run"
+  },
+  "napi": {
+    "binaryName": "binding",
+    "packageName": "@petrea/binding",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
   },
   "devDependencies": {
     "@antfu/eslint-config": "^9.0.0",
@@ -56,6 +74,7 @@
     "@emnapi/runtime": "2.0.0-alpha.5",
     "@napi-rs/cli": "^3.9.0",
     "@napi-rs/wasm-runtime": "^1.2.3",
+    "@petrea/binding-wasm32-wasip1": "workspace:*",
     "@tybys/wasm-util": "^0.10.3",
     "@types/node": "^24.12.4",
     "@vitest/coverage-v8": "^4.1.6",
@@ -71,6 +90,7 @@
     "vitest": "^4.1.6"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   }
 }

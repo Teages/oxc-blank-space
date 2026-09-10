@@ -8,6 +8,13 @@ dist
 
 # rust
 native/target
+/target
+
+# generated binding packages: the CI-only native dirs under npm/, and the
+# wasm artifacts inside the tracked @petrea/binding-wasm32-wasip1 manifest dir
+npm/*
+!npm/wasm32-wasip1
+npm/wasm32-wasip1/binding.*
 
 # build staging
 wasm
