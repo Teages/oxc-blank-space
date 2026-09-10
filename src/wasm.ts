@@ -18,6 +18,14 @@ function loadWasmBinding(): NativeBinding {
 const api = createApi(loadWasmBinding)
 
 /**
+ * Whether a usable binding was found. The wasm build instantiates at import
+ * time, so once this module is loaded at all the transpilers are fully
+ * usable — the flag is constant `true`, kept for export parity with the
+ * main entry.
+ */
+export const nativeBindingAvailable = api.isAvailable
+
+/**
  * WebAssembly entry point: the same Rust pipeline compiled to WebAssembly
  * (`wasm32-wasip1`), loaded through `@napi-rs/wasm-runtime` from the
  * `@petrea/binding-wasm32-wasip1` package. The API mirrors the main entry

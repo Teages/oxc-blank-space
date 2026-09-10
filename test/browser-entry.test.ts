@@ -43,6 +43,7 @@ afterAll(() => {
 })
 
 interface BrowserBinding {
+  nativeBindingAvailable: boolean
   transpile: (input: string, options?: object) => Promise<string>
   transpileSync: (input: string, options?: object) => string
 }
@@ -89,6 +90,12 @@ describe('wasm entry (dist/wasm.mjs)', () => {
   // the SyntaxError wrapping is the public API layer's contract (src/api.ts)
   it('[dist] rejects parse errors with a codeframe-carrying SyntaxError', async () => {
     await expect(browser.transpile('let x: = 1')).rejects.toThrow(SyntaxError)
+  })
+
+  // export parity with the main entry: consumers may branch on the flag
+  // regardless of which build the bundler selected
+  it('[dist] reports the binding as available', () => {
+    expect(browser.nativeBindingAvailable).toBe(true)
   })
 })
 
