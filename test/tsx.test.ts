@@ -114,7 +114,6 @@ for (const backend of backends) {
       for (const c of cases) {
         if (c.kind === 'erasure') {
           it(c.id, () => {
-            // Given/When: the matrix input, transpiled in tsx mode
             const reports: UnsupportedSyntax[] = []
             const output = backend.transpile(c.input, {
               lang: 'tsx',
@@ -122,10 +121,6 @@ for (const backend of backends) {
                 reports.push(node)
               },
             })
-            // Then: independent expectation, reference agreement where due,
-            // plain-JSX output, text fidelity, runtime equivalence — and
-            // nothing is reported as unsupported: every construct in an
-            // erasure row must be erased, never kept verbatim
             expect(reports, 'erasable input must produce no reports').toEqual([])
             if (typeof c.expected === 'string') {
               expect(output).toBe(c.expected)
@@ -157,15 +152,12 @@ for (const backend of backends) {
         }
         else if (c.kind === 'parse-error') {
           it(c.id, () => {
-            // When/Then: the input is rejected as a SyntaxError whose
-            // diagnostics match the pinned pattern
             expect(() => backend.transpile(c.input, c.options)).toThrow(SyntaxError)
             expect(() => backend.transpile(c.input, c.options)).toThrow(c.messagePattern)
           })
         }
         else {
           it(c.id, () => {
-            // Given/When: the input, transpiled with reports collected
             const reports: UnsupportedSyntax[] = []
             const output = backend.transpile(c.input, {
               ...c.options,
@@ -173,8 +165,6 @@ for (const backend of backends) {
                 reports.push(node)
               },
             })
-            // Then: the construct is kept verbatim, reported with the pinned
-            // type, and the report offsets slice exactly the offending source
             expect(output).toBe(c.expected)
             expect(reports.map(r => r.type)).toEqual(c.reports.map(r => r.type))
             for (const [index, report] of reports.entries()) {
@@ -196,23 +186,17 @@ for (const backend of backends) {
         }
         else {
           it(`corpus: ${row.file}`, () => {
-            // Given: the vendored upstream file and its committed expected
-            // output, transpiled in tsx mode
             const expected = readFileSync(
               join(corpusDir, 'expected', row.file.replace(/\.(tsx|ts)$/, '.js')),
               'utf8',
             )
             const reports: UnsupportedSyntax[] = []
-            // When: transpiled in tsx mode
             const output = backend.transpile(input, {
               lang: 'tsx',
               onError: (node) => {
                 reports.push(node)
               },
             })
-            // Then: committed expectation, fidelity, plain-JSX output where
-            // the file qualifies, the pinned .jsx diagnostic count otherwise,
-            // reference parity where due, and the pinned report set
             expect(output).toBe(expected)
             expectTextFidelity(input, output)
             if (row.pureJsxOutput) {
@@ -232,12 +216,9 @@ for (const backend of backends) {
 
     describe('option forms', () => {
       it('parses identically via lang and via a .tsx filename', () => {
-        // Given: a `<T,>`-disambiguated generic arrow inside JSX
         const input = 'const f = <T,>(x: T): T => <b>{x satisfies T}</b>\n'
-        // When: transpiled once per option form
         const byLang = backend.transpile(input, { lang: 'tsx' })
         const byFilename = backend.transpile(input, { filename: 'component.tsx' })
-        // Then: both option forms blank identically and match the reference
         expect(byLang).toBe(byFilename)
         expect(byLang).toBe(tsxBlankSpace(input))
       })
@@ -248,15 +229,12 @@ for (const backend of backends) {
         f.endsWith('.tsx'),
       )) {
         it(`fixture parity: ${filename}`, () => {
-          // Given: an in-repo tsx case and its committed expected output
           const input = readFileSync(join(fixtureDir, filename), 'utf8')
           const expected = readFileSync(
             join(fixtureDir, filename.replace(/\.tsx$/, '.js')),
             'utf8',
           )
-          // When: transpiled in tsx mode
           const output = backend.transpile(input, { lang: 'tsx' })
-          // Then: committed output and reference implementation agree
           expect(output).toBe(expected)
           expect(output).toBe(tsxBlankSpace(input))
           expectParsesAsJsx(backend, output)
@@ -268,15 +246,11 @@ for (const backend of backends) {
 
 describe('runtime-equivalence layer guards', () => {
   it('rejects illegal input through tsc diagnostics instead of comparing recovered semantics', () => {
-    // Given: input the TypeScript compiler only parses via error recovery
     const input = 'const el = <div></span>;\n'
-    // When/Then: the helper refuses to evaluate it — the equivalence layer
-    // never compares compiler-recovered semantics against petrea's output
     expect(() => evaluateWithTsc(input)).toThrow(/typescript failed to compile/)
   })
 
   it('accepts the matrix runtime inputs without diagnostics', () => {
-    // Given/When: every runtime row's input, compiled with diagnostics on
     for (const c of cases) {
       if (c.kind === 'erasure' && c.runtime) {
         expect(() => evaluateWithTsc(c.input), c.id).not.toThrow()
