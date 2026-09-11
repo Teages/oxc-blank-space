@@ -258,6 +258,22 @@ export const cases: readonly TsxCase[] = [
   },
   {
     kind: 'erasure',
+    id: 'combo/type-arguments-index-signature',
+    category: 'ts-jsx-combos',
+    input: 'const el = <Comp<{ [key: string]: number }> x={v as string}/>\n',
+    expected: `const el = <Comp${' '.repeat(27)} x={v          }/>\n`,
+    ref: false,
+  },
+  {
+    kind: 'erasure',
+    id: 'combo/type-arguments-nested-index-signature',
+    category: 'ts-jsx-combos',
+    input: 'const el = <Comp<Array<{ [k: string]: number }>, string> x={1}/>\n',
+    expected: `const el = <Comp${' '.repeat(40)} x={1}/>\n`,
+    ref: false,
+  },
+  {
+    kind: 'erasure',
     id: 'combo/type-arguments-multi-parameter',
     category: 'ts-jsx-combos',
     input: 'const el = <Comp<A, B> x={1}/>\n',
