@@ -70,9 +70,25 @@ function assertBrowserBehavior(binding: BrowserBinding, label: string) {
     expect(binding.transpileSync('const a: number = 1')).toBe('const a         = 1')
   })
 
+  it(`[${label}] blanks TS syntax inside JSX in tsx mode`, () => {
+    expect(binding.transpileSync('const el = <div>{v as string}</div>\n', { lang: 'tsx' }))
+      .toBe('const el = <div>{v          }</div>\n')
+  })
+
+  it(`[${label}] erases JSX element type arguments in tsx mode`, () => {
+    expect(binding.transpileSync('const el = <Comp<T> x={v as string}/>\n', { lang: 'tsx' }))
+      .toBe('const el = <Comp    x={v          }/>\n')
+  })
+
   it(`[${label}] expands enums through the async entry`, async () => {
     const output = await binding.transpile('enum E { A = 2 }')
     expect(output).toContain('E[E["A"] = 2] = "A"')
+  })
+
+  it(`[${label}] blanks assertions inside JSX through the async tsx mode`, async () => {
+    await expect(binding.transpile('const el = <div>{v as string}</div>\n', { lang: 'tsx' }))
+      .resolves
+      .toBe('const el = <div>{v          }</div>\n')
   })
 
   it(`[${label}] keeps astral characters lossless through the UTF-16 path`, () => {
