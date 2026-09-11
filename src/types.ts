@@ -10,6 +10,17 @@ export interface UnsupportedSyntax {
 
 export type OnError = (node: UnsupportedSyntax) => void
 
+/**
+ * Options accepted by {@link transpile} / {@link transpileSync}.
+ *
+ * Scope: for legal TS/TSX of the grammar pinned by this repository's test
+ * corpus (TypeScript v6), TypeScript-only syntax is erased by replacing it
+ * with whitespace at the original positions; JSX is preserved byte-for-byte
+ * and still needs a JSX compiler. Type checking is out of scope. Constructs
+ * with runtime semantics that cannot be erased (parameter properties,
+ * `export =`, `import x = require(…)`, runtime namespaces) are kept
+ * verbatim and reported through `onError`; enums are expanded in place.
+ */
 export interface TranspileOptions {
   /**
    * Called for every unsupported construct (namespaces with runtime code,

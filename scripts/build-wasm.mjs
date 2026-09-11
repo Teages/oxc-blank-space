@@ -39,6 +39,11 @@ for (const file of artifacts) {
   cpSync(join(staging, file), join(pkgDir, file))
 }
 
+// the generated loader prefers a `.debug.wasm` over the release module
+// whenever one sits next to it, so a debug artifact left by an earlier
+// direct `napi build` would silently shadow every freshly built release
+rmSync(join(pkgDir, 'binding.wasm32-wasip1.debug.wasm'), { force: true })
+
 // napi skips the raw-module declaration when an explicit --dts path is set;
 // the ./wasm export needs it. Bundler asset imports resolve to the module's
 // URL string, so that is the declared contract.

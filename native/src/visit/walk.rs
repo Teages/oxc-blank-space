@@ -705,6 +705,15 @@ impl<'a> Walker<'a> {
                 VisitResult::Js
             }
 
+            AstKind::JSXOpeningElement(n) => {
+                // `<Comp<T> ...>` — TypeScript erases the type arguments, and
+                // blanking them keeps the remaining tag parseable as plain JSX
+                if let Some(type_args) = &n.type_arguments {
+                    self.blanker.blank_span(type_args.span());
+                }
+                self.visit_children(idx)
+            }
+
             AstKind::PropertyDefinition(_)
             | AstKind::AccessorProperty(_)
             | AstKind::MethodDefinition(_) => class::visit_class_member(self, kind),

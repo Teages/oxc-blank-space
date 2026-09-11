@@ -34,9 +34,16 @@ export interface NativeBinding {
  * Raw lone surrogates cannot survive the UTF-8 boundary into Rust, so inputs
  * containing one are routed to the UTF-16 entry points, which round-trip the
  * original code units losslessly. Paired surrogates (astral characters) are
- * unaffected.
+ * unaffected. A leading BOM takes the same detour: the WebAssembly binding's
+ * UTF-8 decoding drops it while the native binding keeps it, so routing both
+ * builds through the UTF-16 entries keeps their output identical.
  */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+/** Inputs the plain UTF-8 String boundary cannot carry losslessly. */
+function needsUtf16Path(input: string): boolean {
+  return LONE_SURROGATE.test(input) || input.charCodeAt(0) === 0xFEFF
+}
 
 /** UTF-16 code units of a JS string (lossless, unlike `String` → UTF-8). */
 export function toUtf16Units(input: string): Uint16Array {
@@ -133,7 +140,7 @@ export function createApi(load: () => NativeBinding | undefined): {
     options: TranspileOptions = {},
   ): Promise<string> {
     const native = requireBinding()
-    if (LONE_SURROGATE.test(input)) {
+    if (needsUtf16Path(input)) {
       const result = await native
         .transpileUtf16Async(toUtf16Units(input), toNativeOptions(options))
         .catch((error: unknown) => {
@@ -163,7 +170,7 @@ export function createApi(load: () => NativeBinding | undefined): {
     // resolved outside the try blocks: a missing binding throws a plain
     // Error, only parse failures are wrapped into a SyntaxError
     const native = requireBinding()
-    if (LONE_SURROGATE.test(input)) {
+    if (needsUtf16Path(input)) {
       let unitsResult: NativeUnitsResult
       try {
         unitsResult = native.transpileUtf16Sync(toUtf16Units(input), toNativeOptions(options))
