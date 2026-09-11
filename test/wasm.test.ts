@@ -34,6 +34,11 @@ describe('wasm binding', () => {
       .toBe('const a         = 1')
   })
 
+  it('blanks TS syntax inside JSX in tsx mode', () => {
+    expect(binding.transpileNativeSync('const el = <div>{v as string}</div>\n', { lang: 'tsx' }).code)
+      .toBe('const el = <div>{v          }</div>\n')
+  })
+
   it('expands enums and evaluates like the TypeScript emitter', () => {
     const output = binding.transpileNativeSync('enum Color { Red, Green = 5, Blue }').code
     expect(output).toBe(
@@ -72,10 +77,13 @@ describe('wasm binding', () => {
 
   it('matches the platform binary on the fixture corpus', () => {
     const fixtureDir = join(root, 'test/fixture')
-    for (const file of readdirSync(fixtureDir).filter(f => f.endsWith('.ts'))) {
+    for (const file of readdirSync(fixtureDir).filter(
+      f => f.endsWith('.ts') || f.endsWith('.tsx'),
+    )) {
       const input = readFileSync(join(fixtureDir, file), 'utf8')
-      const wasmOutput = binding.transpileNativeSync(input).code
-      expect(wasmOutput, `wasm output for ${file}`).toBe(transpileSync(input))
+      const options = file.endsWith('.tsx') ? { lang: 'tsx' } : undefined
+      const wasmOutput = binding.transpileNativeSync(input, options).code
+      expect(wasmOutput, `wasm output for ${file}`).toBe(transpileSync(input, options))
     }
   })
 })

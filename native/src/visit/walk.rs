@@ -567,6 +567,34 @@ impl<'a> Walker<'a> {
             .find(|&c| self.nodes[c as usize].span() == span)
     }
 
+    /// [`Self::visit_children`], skipping the subtree whose top node spans
+    /// `excluded` — for spans the caller already erased wholesale, whose
+    /// nested type nodes must not be visited again (a TSIndexSignature
+    /// inside `<Comp<{ [k: string]: number }>>` carries its own blanking
+    /// arm, and a second blank corrupts the splice cursor).
+    fn visit_children_excluding(&mut self, idx: u32, excluded: Span) -> VisitResult {
+        let mut children = self.scratch_pool.pop().unwrap_or_default();
+        children.clear();
+
+        let mut child = self.first_child[idx as usize];
+        let mut sorted = true;
+        let mut previous_start = 0u32;
+        while child != u32::MAX {
+            if self.nodes[child as usize].span() == excluded {
+                child = self.next_sibling[child as usize];
+                continue;
+            }
+            let start = self.nodes[child as usize].span().start;
+            if start < previous_start {
+                sorted = false;
+            }
+            previous_start = start;
+            children.push(child);
+            child = self.next_sibling[child as usize];
+        }
+        self.visit_collected_children(children, sorted)
+    }
+
     fn visit_children(&mut self, idx: u32) -> VisitResult {
         let mut children = self.scratch_pool.pop().unwrap_or_default();
         children.clear();
@@ -583,11 +611,20 @@ impl<'a> Walker<'a> {
             children.push(child);
             child = self.next_sibling[child as usize];
         }
+        self.visit_collected_children(children, sorted)
+    }
+
+    /// Shared tail of the child-collection visitors: sorts when needed and
+    /// walks the collected child indices, returning the scratch buffer.
+    fn visit_collected_children(
+        &mut self,
+        mut children: Vec<u32>,
+        sorted: bool,
+    ) -> VisitResult {
         if children.is_empty() {
             self.scratch_pool.push(children);
             return VisitResult::Js;
         }
-
         if !sorted {
             children.sort_by_key(|&c| self.nodes[c as usize].span().start);
         }
@@ -703,6 +740,23 @@ impl<'a> Walker<'a> {
                 self.visit_nested_expr(&n.expression);
                 self.blanker.blank_span(n.type_arguments.span());
                 VisitResult::Js
+            }
+
+            AstKind::JSXOpeningElement(n) => {
+                // `<Comp<T> ...>` — TypeScript erases the type arguments, and
+                // blanking them keeps the remaining tag parseable as plain
+                // JSX. The erased subtree is then skipped: nested type nodes
+                // with blanking arms of their own (a TSIndexSignature inside
+                // `<Comp<{ [k: string]: number }>>`) would blank a second
+                // time and corrupt the splice cursor.
+                match &n.type_arguments {
+                    Some(type_args) => {
+                        let span = type_args.span();
+                        self.blanker.blank_span(span);
+                        self.visit_children_excluding(idx, span)
+                    }
+                    None => self.visit_children(idx),
+                }
             }
 
             AstKind::PropertyDefinition(_)
