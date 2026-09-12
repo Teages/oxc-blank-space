@@ -1,13 +1,9 @@
-//! Native Rust implementation of `petrea`.
-//!
-//! Exposes the napi bindings used by the package's main and browser entries:
-//! parsing and blanking run on a background thread (napi `AsyncTask`) and
-//! resolve with the output plus the list of unsupported constructs. The
-//! synchronous and UTF-16 variants exist for the calling-thread and
-//! lossless-surrogate paths.
+//! Native Rust implementation of `petrea`: napi bindings whose parse+blank
+//! work runs on a background thread (napi `AsyncTask`). The synchronous and
+//! UTF-16 variants exist for the calling-thread and lossless-surrogate paths.
 
-/// Flat index of a concrete AST node; assigned during the flatten pass in
-/// `visit::walk::blank_program` (visible crate-wide, must stay above the `mod` items).
+/// Flat index of a concrete AST node, assigned by the flatten pass in
+/// `visit::walk::blank_program` (kept above the `mod` items: macros must precede use).
 macro_rules! node_index {
     ($n:expr) => {
         $n.node_id.get().index() as u32
@@ -22,15 +18,15 @@ use napi::bindgen_prelude::{AsyncTask, Uint16Array};
 use napi::{Env, Error, Result, Status, Task};
 use napi_derive::napi;
 
-/// Options accepted by the native bindings. `onError` reporting is returned as
-/// data (`TranspileNativeResult::unsupported`) so the background task never
-/// needs to call back into JS; the JS wrapper invokes the user callback.
+/// Options for the native bindings. `onError` reporting comes back as data so
+/// the background task never calls back into JS; the JS wrapper invokes the
+/// user callback.
 #[napi(object)]
 pub struct TranspileNativeOptions {
     /// Parse the input as `ts` (default) or `tsx`.
     pub lang: Option<String>,
-    /// Source path quoted in the diagnostics of parse failures; the extension
-    /// also selects the parse mode (a `.tsx` filename enables JSX).
+    /// Source path quoted in parse-failure diagnostics; its extension also
+    /// selects the parse mode (a `.tsx` filename enables JSX).
     pub filename: Option<String>,
 }
 
@@ -48,9 +44,8 @@ pub struct TranspileNativeResult {
     pub unsupported: Vec<NativeUnsupported>,
 }
 
-/// UTF-16 variant of [`TranspileNativeResult`]: `code` carries the output as
-/// raw UTF-16 code units, which is the only way to round-trip raw lone
-/// surrogates losslessly (a Rust `String` cannot hold them).
+/// UTF-16 variant of [`TranspileNativeResult`]: raw code units are the only
+/// way to round-trip raw lone surrogates (a Rust `String` cannot hold them).
 #[napi(object)]
 pub struct TranspileUnitsResult {
     pub code: Uint16Array,
@@ -68,9 +63,8 @@ fn resolve_filename(options: Option<&TranspileNativeOptions>) -> String {
     })
 }
 
-/// The API contract (`types.ts`) promises character offsets — JS string
-/// indices, i.e. UTF-16 code units. Internal spans are UTF-8 bytes; convert
-/// so `input.slice(start, end)` slices the same text on both entries.
+/// The API contract (`types.ts`) promises JS string indices (UTF-16 code
+/// units); internal spans are UTF-8 bytes, so convert.
 fn utf16_offset(input: &str, byte_offset: u32) -> u32 {
     if input.is_ascii() {
         return byte_offset;
@@ -140,9 +134,8 @@ impl Task for TranspileTask {
     }
 }
 
-/// Async entry point: blank TypeScript-only syntax on a background thread.
-/// Resolves with the blanked code plus the list of unsupported constructs;
-/// rejects with a `SyntaxError`-message error when the input cannot be parsed.
+/// Async entry point: parses and blanks on a background thread; rejects with
+/// a `SyntaxError`-style error when the input cannot be parsed.
 #[napi(ts_return_type = "Promise<TranspileNativeResult>")]
 pub fn transpile_async(
     input: String,
@@ -152,8 +145,7 @@ pub fn transpile_async(
     AsyncTask::new(TranspileTask { input, filename })
 }
 
-/// Synchronous counterpart of `transpile_async`; wrapped by the JS
-/// `transpileSync` export.
+/// Synchronous counterpart of `transpile_async` (the JS `transpileSync` export).
 #[napi]
 pub fn transpile_native_sync(
     input: String,
@@ -166,12 +158,9 @@ pub fn transpile_native_sync(
 
 #[cfg(test)]
 mod perf_bench {
-    //! Internal performance harness — run with:
+    //! Internal performance harness:
     //! `cargo test --release perf_bench -- --ignored --nocapture`
-    //!
-    //! Reports the parse-only floor, the parse+tokens floor, and the full
-    //! transpile pipeline over the fixture corpus. Timings are min/mean over
-    //! many iterations; use `--release`, debug numbers are meaningless.
+    //! (`--release` required; debug numbers are meaningless).
 
     use std::fs;
     use std::time::Instant;
@@ -289,10 +278,8 @@ impl Task for TranspileUnitsTask {
     }
 }
 
-/// UTF-16 entry point: `units` are the input's UTF-16 code units. Raw lone
-/// surrogates — which cannot cross into a Rust `String` — are handled
-/// losslessly here instead of through the lossy `String` conversion, and the
-/// result comes back as code units. Report offsets are UTF-16 code units.
+/// UTF-16 entry point: raw lone surrogates — which cannot cross into a Rust
+/// `String` — are handled losslessly here; report offsets are UTF-16 units.
 #[napi(ts_return_type = "Promise<TranspileUnitsResult>")]
 pub fn transpile_utf16_async(
     units: Uint16Array,

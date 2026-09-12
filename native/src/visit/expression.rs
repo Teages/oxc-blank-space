@@ -45,7 +45,7 @@ pub(crate) fn visit_non_null_expression<'a>(
 }
 
 /// `expr as T` / `expr satisfies T`. When the assertion ends the enclosing
-/// statement without a trailing `;`, the blank starts with a `;` so that a
+/// statement without a trailing `;`, the blank starts with a `;` so a
 /// following `(`- or `[`-headed statement cannot merge into the expression.
 pub(crate) fn visit_type_assertion<'a>(
     w: &mut Walker<'a>,

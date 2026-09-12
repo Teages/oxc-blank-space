@@ -29,16 +29,12 @@ describe('native transpiler', () => {
     f.endsWith('.ts'),
   )) {
     it(`fixture parity: ${filename}`, () => {
-      // Given: a case file from the ts-blank-space fixture corpus and its
-      // committed expected output
       const input = readFileSync(join(fixtureDir, filename), 'utf8')
       const expected = readFileSync(
         join(fixtureDir, filename.replace(/\.ts$/, '.js')),
         'utf8',
       )
-      // When: transpiled
       const output = transpileSync(input)
-      // Then: the result matches the reference implementation byte for byte
       expect(output).toBe(expected)
       expect(output).toBe(tsBlankSpace(input))
       expectAsyncToMatch(input, output)
