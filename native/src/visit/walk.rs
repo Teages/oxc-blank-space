@@ -95,7 +95,7 @@ pub(crate) fn derive_parents(first_child: &[u32], next_sibling: &[u32]) -> Vec<u
 /// switch, whose cases share one scope; 0 is the program). A node's own
 /// index *is* its scope's identity, so no serial table exists: scope
 /// chains walk the introducing nodes' parents (see
-/// [`enums::model::scope_chain_of`]). The flat array is preorder, so a
+/// `enums::model::scope_chain_of`). The flat array is preorder, so a
 /// parent's entry is always written before its children read it.
 pub(crate) fn derive_node_scopes(
     nodes: &[AstKind<'_>],
