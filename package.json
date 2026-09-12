@@ -14,6 +14,10 @@
       "import": "./dist/index.mjs",
       "default": "./dist/index.mjs"
     },
+    "./register": {
+      "types": "./dist/register.d.mts",
+      "default": "./dist/register.mjs"
+    },
     "./wasm": {
       "types": "./dist/wasm.d.mts",
       "default": "./dist/wasm.mjs"
@@ -26,6 +30,9 @@
     "*": {
       ".": [
         "./dist/index.d.mts"
+      ],
+      "register": [
+        "./dist/register.d.mts"
       ],
       "wasm": [
         "./dist/wasm.d.mts"
