@@ -8,11 +8,11 @@
 
 use oxc_ast::ast::*;
 
-use super::enum_model::{
+use super::model::{
     DeclarationMembers, EnumDeclarations, MemberValue, Wrapper, unwrap_transparent,
 };
-use super::enum_number::{to_int32, to_uint32};
-use super::enum_text::string_literal_value_units;
+use super::number::{to_int32, to_uint32};
+use super::text::string_literal_value_units;
 
 /// Constant-fold an initializer for the auto-increment chain (JS semantics:
 /// all arithmetic happens on f64, bitwise operators go through ToInt32).

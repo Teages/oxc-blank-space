@@ -11,12 +11,12 @@
 use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 
-use super::enum_fold::eval_constant;
-use super::enum_model::{
+use super::fold::eval_constant;
+use super::model::{
     DeclarationMembers, EnumDeclarations, MemberValue, StringMember, Wrapper, unwrap_transparent,
 };
-use super::enum_number::js_number_to_string;
-use super::enum_text::{SourceText, decode_template_units, string_literal_value_units};
+use super::number::js_number_to_string;
+use super::text::{SourceText, decode_template_units, string_literal_value_units};
 
 /// Constant-fold an initializer to a string value over UTF-16 units, like
 /// the TypeScript checker: string literals, earlier string members (bare

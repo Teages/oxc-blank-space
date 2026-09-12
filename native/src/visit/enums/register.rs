@@ -11,11 +11,11 @@ use oxc_ast::AstKind;
 use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 
-use super::enum_model::{
+use super::model::{
     ConstBinding, ConstBindings, EnumMembers, enum_group_scope, member_name_of, scope_above,
     scope_chain_of,
 };
-use super::walk::Walker;
+use crate::visit::walk::Walker;
 
 /// Register one enum declaration: its merge-group slot (first-declaration
 /// and first-export starts) always; its member-scope and shadow bindings

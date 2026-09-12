@@ -10,7 +10,7 @@ use oxc_ast::AstKind;
 use oxc_ast::ast::{Expression, TSEnumMember, TSEnumMemberName};
 use oxc_span::GetSpan;
 
-use super::walk::{Walker, introduces_lexical_scope, is_enum_scope_container};
+use crate::visit::walk::{Walker, introduces_lexical_scope, is_enum_scope_container};
 
 /// A folded string member: its UTF-16 value and the TypeScript
 /// literal-ness of its source. The emitter's two decisions are
@@ -54,7 +54,7 @@ pub(crate) enum ConstBinding<'a> {
 /// registration and lookup never allocate. The scope model mirrors the
 /// enum merge groups — one serial per statement-list container — extended
 /// with the var-hoisting and parameter rules of ECMAScript (see
-/// registration in [`super::enum_register`]).
+/// registration in [`super::register`]).
 pub(crate) struct ConstBindings<'a> {
     pub bindings: HashMap<u32, HashMap<&'a str, ConstBinding<'a>>>,
     /// The enum member scope each enum declaration introduced, mapped to
@@ -148,7 +148,7 @@ pub(crate) struct ResolveSession<'a, 'b> {
     pub enums: &'b HashMap<(u32, String), EnumMembers>,
     /// the source text, for lossless string literal decoding while
     /// resolving const initializers
-    pub source: super::enum_text::SourceText<'a>,
+    pub source: super::text::SourceText<'a>,
     /// the enum groups this session's evaluations have read, for
     /// dependency tracking
     pub touched: RefCell<Vec<(u32, String)>>,
@@ -159,7 +159,7 @@ impl<'a, 'b> ResolveSession<'a, 'b> {
         bindings: &'b ConstBindings<'a>,
         cache: &'b ConstCache,
         enums: &'b HashMap<(u32, String), EnumMembers>,
-        source: super::enum_text::SourceText<'a>,
+        source: super::text::SourceText<'a>,
     ) -> Self {
         Self {
             bindings,
@@ -424,7 +424,7 @@ pub(super) fn unwrap_transparent<'p, 'a>(
 /// sibling-reference qualification. String-literal names decode from
 /// the raw source — the AST's `value` is lossy for lone surrogates.
 pub(super) fn member_name_of(w: &Walker<'_>, member: &TSEnumMember<'_>) -> Vec<u16> {
-    let source = super::enum_text::SourceText {
+    let source = super::text::SourceText {
         src: w.src,
         units: w.units,
         byte_to_unit: w.byte_to_unit,
@@ -432,7 +432,7 @@ pub(super) fn member_name_of(w: &Walker<'_>, member: &TSEnumMember<'_>) -> Vec<u
     match &member.id {
         TSEnumMemberName::Identifier(id) => id.name.as_str().encode_utf16().collect(),
         TSEnumMemberName::String(literal) | TSEnumMemberName::ComputedString(literal) => {
-            super::enum_text::string_literal_value_units(&source, literal)
+            super::text::string_literal_value_units(&source, literal)
         }
         // invalid TS (computed template); keep the raw text
         TSEnumMemberName::ComputedTemplateString(template) => {

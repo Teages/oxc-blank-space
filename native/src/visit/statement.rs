@@ -2,7 +2,7 @@ use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 
 use super::walk::{VisitResult, Walker};
-use super::{class, enum_exp, function, namespace};
+use super::{class, enums, function, namespace};
 
 pub(crate) fn visit_import_declaration<'a>(
     w: &mut Walker<'a>,
@@ -87,7 +87,7 @@ pub(crate) fn visit_exported_declaration<'a>(
                 w.blanker.blank_statement(wrapper);
                 VisitResult::Blanked
             } else {
-                enum_exp::expand_enum(w, declaration);
+                enums::exp::expand_enum(w, declaration);
                 VisitResult::Js
             }
         }

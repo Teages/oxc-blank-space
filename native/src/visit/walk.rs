@@ -14,9 +14,7 @@ use oxc_parser::Token;
 use oxc_span::{GetSpan, Span};
 use oxc_syntax::node::NodeId;
 
-use super::{
-    class, enum_collect, enum_exp, enum_model, expression, function, namespace, pattern, statement,
-};
+use super::{class, enums, expression, function, namespace, pattern, statement};
 use crate::blank::blanker::{Blanker, UnsupportedSyntax};
 /// Result of visiting a node.
 /// - `js`: JavaScript was (or may have been) emitted for this node.
@@ -97,7 +95,7 @@ pub(crate) fn derive_parents(first_child: &[u32], next_sibling: &[u32]) -> Vec<u
 /// switch, whose cases share one scope; 0 is the program). A node's own
 /// index *is* its scope's identity, so no serial table exists: scope
 /// chains walk the introducing nodes' parents (see
-/// [`enum_model::scope_chain_of`]). The flat array is preorder, so a
+/// [`enums::model::scope_chain_of`]). The flat array is preorder, so a
 /// parent's entry is always written before its children read it.
 pub(crate) fn derive_node_scopes(
     nodes: &[AstKind<'_>],
@@ -203,15 +201,15 @@ pub struct Walker<'a> {
     /// the walker approximates by its enclosing statement list. Frozen after
     /// the collection pre-pass: the emit pass only reads it, so sharing an
     /// [`Rc`] avoids cloning the whole table per enum declaration.
-    pub(crate) enum_members: Rc<HashMap<(u32, String), enum_model::EnumMembers>>,
+    pub(crate) enum_members: Rc<HashMap<(u32, String), enums::model::EnumMembers>>,
     /// Compile-time values of `const` bindings and the reassignable names
     /// shadowing them, keyed like the enum tables. Frozen after the
     /// collection pre-pass; the emit pass only reads it.
-    pub(crate) const_bindings: Rc<enum_model::ConstBindings<'a>>,
+    pub(crate) const_bindings: Rc<enums::model::ConstBindings<'a>>,
     /// Per enum declaration (flat index), each member's name and the fold
     /// the collection pass decided — the emit pass never re-evaluates.
     /// Empty for files without enums.
-    pub(crate) enum_folds: HashMap<u32, Vec<enum_collect::MemberRecord>>,
+    pub(crate) enum_folds: HashMap<u32, Vec<enums::collect::MemberRecord>>,
     /// Parent of every flattened node (u32::MAX for the root) and the scope
     /// each node sits in (see [`derive_node_scopes`]). Only the enum
     /// machinery reads these: parents exist for every enum-declaring file,
@@ -229,10 +227,10 @@ pub struct Walker<'a> {
 /// binding resolution — enums whose initializers only read their own
 /// group's members (the common case: literals, sibling references and
 /// arithmetic over them) resolve nothing outside themselves and skip the
-/// heavy model. [`enum_collect::collect_enum_declarations`] decides.
+/// heavy model. [`enums::collect::collect_enum_declarations`] decides.
 fn prepare_enum_tables(walker: &mut Walker<'_>, enum_indices: &[u32]) {
     walker.parent = derive_parents(&walker.first_child, &walker.next_sibling);
-    let mut collected = enum_collect::collect_enum_declarations(walker, enum_indices);
+    let mut collected = enums::collect::collect_enum_declarations(walker, enum_indices);
     if collected.needs_scope_model {
         walker.node_scope = derive_node_scopes(
             &walker.nodes,
@@ -240,7 +238,7 @@ fn prepare_enum_tables(walker: &mut Walker<'_>, enum_indices: &[u32]) {
             &walker.first_child,
             &walker.next_sibling,
         );
-        collected = enum_collect::collect_enum_declarations(walker, enum_indices);
+        collected = enums::collect::collect_enum_declarations(walker, enum_indices);
     }
     walker.enum_members = Rc::new(collected.table);
     walker.const_bindings = Rc::new(collected.bindings);
@@ -288,7 +286,7 @@ pub fn blank_program<'a>(
         scratch_pool: Vec::new(),
         parent_statement: None,
         enum_members: Rc::new(HashMap::new()),
-        const_bindings: Rc::new(enum_model::ConstBindings {
+        const_bindings: Rc::new(enums::model::ConstBindings {
             bindings: HashMap::new(),
             enum_scopes: HashMap::new(),
         }),
@@ -341,7 +339,7 @@ pub fn blank_program_utf16<'a>(
         scratch_pool: Vec::new(),
         parent_statement: None,
         enum_members: Rc::new(HashMap::new()),
-        const_bindings: Rc::new(enum_model::ConstBindings {
+        const_bindings: Rc::new(enums::model::ConstBindings {
             bindings: HashMap::new(),
             enum_scopes: HashMap::new(),
         }),
@@ -553,7 +551,7 @@ impl<'a> Walker<'a> {
     /// units on the UTF-16 path (lossless for lone surrogates), from the
     /// parse copy otherwise.
     pub(crate) fn original_span_units(&self, span: Span) -> Vec<u16> {
-        super::enum_text::SourceText {
+        super::enums::text::SourceText {
             src: self.src,
             units: self.units,
             byte_to_unit: self.byte_to_unit,
@@ -616,11 +614,7 @@ impl<'a> Walker<'a> {
 
     /// Shared tail of the child-collection visitors: sorts when needed and
     /// walks the collected child indices, returning the scratch buffer.
-    fn visit_collected_children(
-        &mut self,
-        mut children: Vec<u32>,
-        sorted: bool,
-    ) -> VisitResult {
+    fn visit_collected_children(&mut self, mut children: Vec<u32>, sorted: bool) -> VisitResult {
         if children.is_empty() {
             self.scratch_pool.push(children);
             return VisitResult::Js;
@@ -784,7 +778,7 @@ impl<'a> Walker<'a> {
                     self.blanker.blank_statement(n.span());
                     VisitResult::Blanked
                 } else {
-                    enum_exp::expand_enum(self, n);
+                    enums::exp::expand_enum(self, n);
                     VisitResult::Js
                 }
             }

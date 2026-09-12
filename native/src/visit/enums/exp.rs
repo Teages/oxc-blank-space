@@ -11,9 +11,9 @@
 //! ```
 //!
 //! This module emits each declaration's IIFE — folding initializers
-//! through [`super::enum_fold`]/[`super::enum_fold_string`] and qualifying
-//! member references through [`super::enum_qualify`], over the group
-//! tables [`super::enum_collect`] gathered. The surrounding text (braces,
+//! through [`super::fold`]/[`super::fold_string`] and qualifying
+//! member references through [`super::qualify`], over the group
+//! tables [`super::collect`] gathered. The surrounding text (braces,
 //! whitespace, comments between members) is kept; only the keyword, the
 //! name and the members are rewritten, so the output length may differ
 //! from the input. `const enum` is expanded the same way so that
@@ -26,13 +26,13 @@ use oxc_ast::ast::*;
 use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
-use super::enum_fold_string::is_string_typed;
-use super::enum_model::MemberValue;
-use super::enum_model::{DeclarationMembers, enum_group_scope, is_block_scoped};
-use super::enum_number::js_number_to_string;
-use super::enum_qualify::{QualifyContext, QualifyState, qualify_expr};
-use super::enum_text::{json_quote, json_quote_utf16, string_literal_value_units};
-use super::walk::{Walker, expr_index};
+use super::fold_string::is_string_typed;
+use super::model::MemberValue;
+use super::model::{DeclarationMembers, enum_group_scope, is_block_scoped};
+use super::number::js_number_to_string;
+use super::qualify::{QualifyContext, QualifyState, qualify_expr};
+use super::text::{json_quote, json_quote_utf16, string_literal_value_units};
+use crate::visit::walk::{Walker, expr_index};
 
 pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     let enum_index = node.node_id.get().index() as u32;
@@ -119,7 +119,7 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     }
 
     // Member emission reads the folds the collection pass decided (see
-    // [`super::enum_collect::MemberFold`]) — only the runtime branch
+    // [`super::collect::MemberFold`]) — only the runtime branch
     // re-walks its initializer, erasing TS syntax and qualifying member
     // references. The group table is shared through the walker's `Rc`
     // (cheap refcount, no per-declaration deep clone); this declaration's
@@ -262,7 +262,7 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
 /// UTF-16 code units, so escaped lone surrogates (`"\uD800"`) re-emit exactly
 /// like `JSON.stringify` does: lowercase `\udXXXX`.
 fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
-    let source = super::enum_text::SourceText {
+    let source = super::text::SourceText {
         src: w.src,
         units: w.units,
         byte_to_unit: w.byte_to_unit,
