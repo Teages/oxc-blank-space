@@ -26,6 +26,16 @@ console.log(transpileSync(`const a: number = 1`))
 // result: `const a         = 1`
 ```
 
+## Run TypeScript directly in Node
+
+```bash
+node --import petrea/register ./app.ts
+```
+
+`petrea/register` hooks petrea into Node's module system, stripping types from
+`.ts`/`.tsx`/`.mts`/`.cts` files as they load — both `import` and `require()`.
+Module format follows the nearest `package.json` `type` field.
+
 ## License
 
 [MIT](./LICENSE) — © 2025-present Teages.
