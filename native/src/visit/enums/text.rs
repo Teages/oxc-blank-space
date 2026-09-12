@@ -1,7 +1,6 @@
-//! JS string-literal text for enum members: decoding escape sequences over
-//! UTF-16 code units (lossless for lone surrogates) and the
-//! `JSON.stringify` quote forms the TypeScript emitter uses for member keys
-//! and folded string values.
+//! JS string-literal text for enum members: escape decoding over UTF-16 code
+//! units (lossless for lone surrogates) and the `JSON.stringify` quote forms
+//! the TypeScript emitter uses for member keys and folded string values.
 
 use oxc_ast::ast::StringLiteral;
 use oxc_span::Span;
@@ -9,9 +8,9 @@ use oxc_span::Span;
 use crate::visit::walk::unit_at;
 
 /// The source decoding context string folding reads from: the parse copy,
-/// and on the lossless UTF-16 path the original code units with their byte
-/// map. A standalone value (not a `Walker` borrow), so resolution sessions
-/// can hold it without freezing the walker for their lifetime.
+/// plus the original code units with their byte map on the UTF-16 path. A
+/// standalone value (not a `Walker` borrow), so resolution sessions can hold
+/// it without freezing the walker.
 #[derive(Clone, Copy)]
 pub(crate) struct SourceText<'a> {
     pub src: &'a str,
@@ -20,9 +19,8 @@ pub(crate) struct SourceText<'a> {
 }
 
 impl<'a> SourceText<'a> {
-    /// The UTF-16 code units of `span` — the original units on the UTF-16
-    /// path (lossless for lone surrogates), the parse copy's characters
-    /// otherwise.
+    /// The UTF-16 units of `span` — original units on the UTF-16 path
+    /// (lossless for lone surrogates), parse copy characters otherwise.
     pub fn original_span_units(&self, span: Span) -> Vec<u16> {
         match (self.units, self.byte_to_unit) {
             (Some(units), Some(byte_to_unit)) => {
@@ -42,9 +40,8 @@ impl<'a> SourceText<'a> {
     }
 }
 
-/// Decoded UTF-16 value of a string literal. The raw text comes from the
-/// original code units on the UTF-16 path — the lossy parse copy would
-/// corrupt raw lone surrogates.
+/// Decoded UTF-16 value of a string literal, from the original code units on
+/// the UTF-16 path — the lossy parse copy would corrupt raw lone surrogates.
 pub(super) fn string_literal_value_units(
     source: &SourceText<'_>,
     literal: &StringLiteral<'_>,
@@ -74,16 +71,14 @@ pub(super) fn string_literal_value_units(
     }
 }
 
-/// Decode JS string-literal escape sequences over UTF-16 code units. Lone
-/// surrogates (from `\uD800`-style escapes or raw units on the UTF-16 path)
-/// are preserved as individual units.
+/// Decode JS string-literal escapes over UTF-16 code units; lone surrogates
+/// (`\uD800`-style escapes or raw units) stay as individual units.
 pub(super) fn decode_units(units: &[u16]) -> Vec<u16> {
     decode_units_inner(units, false)
 }
 
-/// [`decode_units`] for template literal quasis: literal <CR><LF> and <CR>
-/// in the source text normalize to <LF>, like every template cooked value.
-/// An escaped `\r` is not a line terminator and stays CR.
+/// [`decode_units`] for template quasis: literal CRLF and lone CR normalize
+/// to LF, like every cooked value; an escaped `\r` stays CR.
 pub(super) fn decode_template_units(units: &[u16]) -> Vec<u16> {
     decode_units_inner(units, true)
 }
@@ -213,8 +208,7 @@ fn hex_value(units: &[u16], start: usize, count: usize) -> Option<(u32, usize)> 
 }
 
 /// `JSON.stringify` over UTF-16 code units: well-formed output — lone
-/// surrogates are escaped as lowercase `\udXXX`, surrogate pairs become the
-/// astral character, controls use the short forms.
+/// surrogates escape as lowercase `\udXXX`, pairs become the astral character.
 pub(super) fn json_quote_utf16(units: &[u16]) -> String {
     let mut out = String::from("\"");
     let mut i = 0usize;

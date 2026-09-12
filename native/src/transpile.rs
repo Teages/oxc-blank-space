@@ -6,10 +6,9 @@ use oxc_parser::Parser;
 use oxc_parser::config::TokensParserConfig;
 use oxc_span::SourceType;
 
-/// Arena pool shared by sync and async calls (the async entry runs on the
-/// libuv thread pool, so concurrent transpiles must not share one arena).
-/// Reusing arenas keeps the parser from re-faulting fresh memory on every
-/// call.
+/// Shared arena pool. The async entry runs on the libuv thread pool, so
+/// concurrent transpiles must not share one arena; reuse keeps the parser
+/// from re-faulting fresh memory on every call.
 pub(crate) fn allocator_pool() -> &'static AllocatorPool {
     static POOL: OnceLock<AllocatorPool> = OnceLock::new();
     POOL.get_or_init(|| {
@@ -26,8 +25,7 @@ pub struct TranspileOutput {
     pub unsupported: Vec<UnsupportedSyntax>,
 }
 
-/// Output of the lossless UTF-16 path: code units plus reports whose offsets
-/// are already UTF-16 code units.
+/// UTF-16 path output: code units, with report offsets already UTF-16 code units.
 pub struct TranspileUnitsOutput {
     pub code: Vec<u16>,
     pub unsupported: Vec<UnsupportedSyntax>,
@@ -36,17 +34,16 @@ pub struct TranspileUnitsOutput {
 /// Replace TypeScript-only syntax with whitespace, keeping the remaining
 /// JavaScript byte-for-byte at its original line and column positions.
 ///
-/// Runtime TypeScript features (enums, namespaces with runtime code, parameter
-/// properties, `export =`, `import x = require(...)` and `<T>expr` assertions)
-/// cannot be blanked: they are kept verbatim and reported through
-/// `TranspileOutput::unsupported`. Inputs that are not valid TypeScript —
-/// including `as`/`satisfies` erasures that would change operator grouping,
-/// which TypeScript itself rejects — return an error.
+/// Runtime TypeScript (enums, namespaces with runtime code, parameter
+/// properties, `export =`, `import x = require(...)`, `<T>expr`) is kept
+/// verbatim and reported through `TranspileOutput::unsupported`. Inputs that
+/// are not valid TypeScript — including `as`/`satisfies` erasures that would
+/// change operator grouping, which TypeScript itself rejects — return an error.
 pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String> {
     let allocator_guard = allocator_pool().get();
     let allocator: &Allocator = &allocator_guard;
-    // Unknown/no extension parses as plain JavaScript (module, no JSX), so
-    // TypeScript syntax fails there instead of parsing as TS.
+    // unknown/no extension falls back to plain JavaScript (module, no JSX):
+    // TypeScript syntax fails there instead of parsing as TS
     let source_type = SourceType::from_path(filename)
         .unwrap_or_else(|_| SourceType::mjs())
         .with_module(true);
@@ -54,10 +51,9 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
         .with_config(TokensParserConfig)
         .parse();
 
-    // Hard parse failures leave no usable AST: the input is not valid
-    // TypeScript, so surface it as a syntax error rather than silently
-    // passing TypeScript through. (Soft parse errors still produce a
-    // recovered AST, which is processed like any other.)
+    // Hard parse failures leave no usable AST — surface them as a syntax error
+    // instead of silently passing TypeScript through. Soft errors still produce
+    // a recovered AST, which is processed like any other.
     if return_value.program.body.is_empty()
         && return_value.program.directives.is_empty()
         && return_value.diagnostics.has_errors()
@@ -78,16 +74,14 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
     Ok(TranspileOutput { code, unsupported })
 }
 
-/// Lossless UTF-16 variant of [`transpile`]: `units` are the original JS
-/// string's code units. The parser works on a lossy UTF-8 copy (raw lone
-/// surrogates cannot exist in Rust strings), but every output unit is taken
-/// from the original units — untouched regions verbatim, blanked ranges with
-/// newline-preserving spaces — so raw lone surrogates survive. Report offsets
-/// are UTF-16 code units.
+/// Lossless UTF-16 variant of [`transpile`]: the parser works on a lossy UTF-8
+/// copy (raw lone surrogates cannot exist in Rust strings), but every output
+/// unit is taken from the original units, so raw lone surrogates survive.
+/// Report offsets are UTF-16 code units.
 pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOutput, String> {
-    // Lossy parse copy: valid pairs become the astral character, every other
-    // unit maps to itself when possible and to U+FFFD otherwise. The copy's
-    // byte length per unit is tracked so spans can be mapped back.
+    // Lossy parse copy: pairs become the astral character, every other unit
+    // maps to itself when possible, U+FFFD otherwise; the byte length per
+    // unit is tracked so spans can be mapped back.
     let mut copy: Vec<u8> = Vec::with_capacity(units.len() * 3);
     let mut byte_to_unit: Vec<u32> = Vec::with_capacity(units.len() + 1);
     let mut index = 0usize;
@@ -109,8 +103,7 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
             );
             // the low surrogate needs its own map entry or every later unit
             // index shifts by one; the entry points at the middle of the
-            // astral char's bytes — a position no span boundary can land on,
-            // so partition_point at real boundaries stays exact
+            // astral char's bytes — no span boundary can land there
             byte_to_unit.push((copy.len() - 2) as u32);
             index += 2;
         } else if unit == 0x0A || unit == 0x0D {
@@ -139,8 +132,7 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         && return_value.program.directives.is_empty()
         && return_value.diagnostics.has_errors()
     {
-        // codeframes render against the lossy parse copy (raw lone surrogates
-        // were already replaced there)
+        // codeframes render against the lossy copy (lone surrogates were already replaced there)
         let details = return_value
             .diagnostics
             .iter()
@@ -202,8 +194,8 @@ pub fn transpile_units_caught(
 }
 
 /// [`transpile`] with panic containment: a bug in an untested AST corner must
-/// surface as a JS exception, not abort the process (napi does not catch
-/// unwinds by default, for either the sync binding or async task compute).
+/// surface as a JS exception, not abort the process — napi does not catch
+/// unwinds by default, for the sync binding or async task compute alike.
 pub fn transpile_caught(input: &str, filename: &str) -> Result<TranspileOutput, String> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile(input, filename))) {
         Ok(result) => result,
@@ -228,8 +220,7 @@ mod tests {
 
     #[test]
     fn blanks_marker_between_comments() {
-        // The `?`/`!` marker sits between two comments; locating it requires
-        // the trivia scanner to hop over the trailing comment.
+        // the `?`/`!` marker sits between two comments; locating it hops the trailing comment
         let output = transpile("class C { private f2/**/!/**/: string; }", "input.ts").unwrap();
         assert_eq!(output.code, "class C {         f2/**/ /**/        ; }");
     }

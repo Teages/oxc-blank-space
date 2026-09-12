@@ -40,10 +40,9 @@ interface ErasureCase {
   /** set false when the output legitimately differs in length (enum expansion) */
   readonly fidelity?: boolean
   /**
-   * pinned count of .jsx-mode parse diagnostics in the output. Omitted for
-   * clean output (zero diagnostics enforced); set for rows whose output
-   * carries input-inherent soft-recovery diagnostics (e.g. mismatched tags
-   * pass through).
+   * Pinned count of .jsx-mode parse diagnostics in the output; set for rows
+   * whose output carries input-inherent soft-recovery diagnostics (e.g.
+   * mismatched tags pass through).
    */
   readonly jsxParseDiagnostics?: number
 }

@@ -4,8 +4,7 @@ use oxc_span::Span;
 use super::blank_string::BlankString;
 use super::trivia::TokenIndex;
 
-/// Information about a TypeScript-only construct that has runtime semantics
-/// and therefore cannot be erased. Positions are byte offsets into the input.
+/// A TypeScript-only construct with runtime semantics; positions are byte offsets.
 #[derive(Debug, Clone)]
 pub struct UnsupportedSyntax {
     pub node_type: &'static str,
@@ -48,9 +47,9 @@ impl<'a> Blanker<'a> {
         self.output.blank(span.start, span.end);
     }
 
-    /// Blank a statement-like node that is being fully erased. A leading `;` is
-    /// emitted when the previous emitted JS lacks one, so that a following
-    /// statement cannot merge into it (ASI protection).
+    /// Blank a statement-like node being fully erased, emitting a leading `;`
+    /// when the previous emitted JS lacks one, so a following statement cannot
+    /// merge into it (ASI protection).
     pub fn blank_statement(&mut self, span: Span) {
         if self.semicolon_needed {
             self.output.blank_but_start_with_semi(span.start, span.end);

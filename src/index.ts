@@ -51,12 +51,11 @@ function platformPackage(suffix: string): string | undefined {
 }
 
 /**
- * Locate the napi binding for the running platform: first the installed
- * `@petrea/binding-<suffix>` optional dependency (exactly one ships in a
- * normal install), then the repo-local build under `binaries/` used during
- * development and CI, before any package exists. Returns undefined when no
- * usable binding exists; a present-but-broken one throws, which the API
- * layer keeps as the `cause` of its "no usable binding" error.
+ * Locate the napi binding: first the installed `@petrea/binding-<suffix>`
+ * optional dependency (exactly one ships in a normal install), then the
+ * repo-local build under `binaries/` (development and CI). Returns undefined
+ * when no usable binding exists; a present-but-broken one throws, which the
+ * API layer keeps as the `cause` of its "no usable binding" error.
  */
 function loadNodeBinding(): NativeBinding | undefined {
   const suffix = platformSuffix()
@@ -88,8 +87,8 @@ const api = createApi(loadNodeBinding)
 
 /**
  * Whether a native binding matching this platform was found. When false,
- * {@link transpile} and {@link transpileSync} throw on use and the
- * WebAssembly build (`petrea/wasm`) is the alternative.
+ * {@link transpile} and {@link transpileSync} throw on use; the WebAssembly
+ * build (`petrea/wasm`) is the alternative.
  */
 export const nativeBindingAvailable = api.isAvailable
 

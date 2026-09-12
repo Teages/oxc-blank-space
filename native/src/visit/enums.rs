@@ -1,9 +1,8 @@
-//! The enum pipeline, split by responsibility: [`collect`]
-//! registers bindings and gathers members, [`exp`] emits, [`model`]
-//! holds the scope/binding registry and merge-group tables, [`fold`]
-//! and [`fold_string`] fold initializers, [`qualify`] rewrites
-//! member references, and [`number`]/[`text`] provide the JS
-//! value semantics those passes share.
+//! The enum pipeline, split by responsibility: [`collect`] registers
+//! bindings and gathers members, [`exp`] emits, [`model`] holds the
+//! scope/binding registry and merge-group tables, [`fold`] and
+//! [`fold_string`] fold initializers, [`qualify`] rewrites member
+//! references, and [`number`]/[`text`] are the shared JS value semantics.
 
 pub mod collect;
 pub mod exp;

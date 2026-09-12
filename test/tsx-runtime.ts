@@ -2,12 +2,11 @@ import ts from 'typescript'
 
 /**
  * The runtime-equivalence layer of the tsx matrix: for behavior-carrying
- * cases, the original input and the blanked output are both compiled to
- * executable JavaScript with the TypeScript compiler (classic React emit)
- * and evaluated against a recording JSX factory. The observable element
- * structure and the evaluation trace must be identical — proving erasure
- * changed nothing at runtime, with the reference compiler as the arbiter of
- * the input's semantics.
+ * cases, input and blanked output are both compiled with the TypeScript
+ * compiler and evaluated against a recording JSX factory. The observable
+ * element structure and evaluation trace must be identical — erasure changed
+ * nothing at runtime, with the reference compiler as arbiter of the input's
+ * semantics.
  */
 
 export interface Evaluation {

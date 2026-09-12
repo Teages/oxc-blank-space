@@ -31,12 +31,12 @@ export interface NativeBinding {
 }
 
 /**
- * Raw lone surrogates cannot survive the UTF-8 boundary into Rust, so inputs
- * containing one are routed to the UTF-16 entry points, which round-trip the
- * original code units losslessly. Paired surrogates (astral characters) are
- * unaffected. A leading BOM takes the same detour: the WebAssembly binding's
- * UTF-8 decoding drops it while the native binding keeps it, so routing both
- * builds through the UTF-16 entries keeps their output identical.
+ * Inputs the plain UTF-8 String boundary cannot carry losslessly route to the
+ * UTF-16 entry points, which round-trip the original code units (paired
+ * surrogates are unaffected). A leading BOM takes the same detour: the
+ * WebAssembly binding's UTF-8 decoding drops it while the native binding
+ * keeps it, so routing both builds through the UTF-16 entries keeps their
+ * output identical.
  */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
@@ -87,10 +87,8 @@ function dispatchReports(
  * Build the public `transpile`/`transpileSync` pair on top of a binding
  * loader. Both platform entries (Node `.node` binary, browser WASM) share
  * this wrapper so surrogate routing, `SyntaxError` wrapping and `onError`
- * dispatch behave identically everywhere.
- *
- * The loader returns `undefined` when no usable binding exists for the
- * runtime; the resulting API then throws on use.
+ * dispatch behave identically. A loader returning `undefined` (or throwing)
+ * yields an API that throws on use.
  */
 export function createApi(load: () => NativeBinding | undefined): {
   transpile: (input: string, options?: TranspileOptions) => Promise<string>
@@ -103,14 +101,13 @@ export function createApi(load: () => NativeBinding | undefined): {
     binding = load()
   }
   catch (error) {
-    // a present-but-broken artifact surfaces through requireBinding, with the
+    // a present-but-broken artifact surfaces through requireBinding,
     // original failure (e.g. a dlopen error) attached as `cause`
     binding = undefined
     loadError = error
   }
 
-  // throws a plain Error — not a SyntaxError, which is reserved for parse
-  // failures on both entry points
+  // plain Error — SyntaxError is reserved for parse failures on both entry points
   function requireBinding(): NativeBinding {
     if (!binding) {
       throw new Error(
@@ -122,11 +119,10 @@ export function createApi(load: () => NativeBinding | undefined): {
   }
 
   /**
-   * Transpile with the Rust implementation, parsing and blanking on a
-   * background thread (Node) or the wasm async worker (browser). Resolves
-   * with the blanked JavaScript; `options.onError` is invoked with the
-   * kept-verbatim unsupported constructs before the promise settles.
-   * Rejects with a `SyntaxError` when the input cannot be parsed.
+   * Transpile with the Rust implementation (background thread on Node, wasm
+   * worker in the browser). `options.onError` fires with the kept-verbatim
+   * unsupported constructs before the promise settles; rejects with a
+   * `SyntaxError` when the input cannot be parsed.
    *
    * ```
    * import { transpile } from 'petrea'
@@ -160,15 +156,14 @@ export function createApi(load: () => NativeBinding | undefined): {
 
   /**
    * Synchronous counterpart of {@link transpile}: the same Rust pipeline,
-   * running entirely on the calling thread. Produces byte-for-byte identical
-   * output; prefer it when no other work needs to run concurrently.
+   * byte-for-byte identical output, on the calling thread.
    */
   function transpileSync(
     input: string,
     options: TranspileOptions = {},
   ): string {
     // resolved outside the try blocks: a missing binding throws a plain
-    // Error, only parse failures are wrapped into a SyntaxError
+    // Error, only parse failures wrap into a SyntaxError
     const native = requireBinding()
     if (needsUtf16Path(input)) {
       let unitsResult: NativeUnitsResult

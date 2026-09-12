@@ -23,8 +23,8 @@ pub(crate) fn visit_import_declaration<'a>(
     VisitResult::Js
 }
 
-/// Specifier-only export declarations: `export { a }` and
-/// `export { a } from 'mod'` are distinct shapes in the native AST.
+/// Specifier-only export declarations: `export { a }` and `export { a } from
+/// 'mod'` are distinct shapes in the native AST.
 pub(crate) fn visit_export_specifiers(
     w: &mut Walker<'_>,
     span: Span,

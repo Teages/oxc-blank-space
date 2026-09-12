@@ -1,6 +1,6 @@
-//! Exact token lookups by source offset. The parser collects the full token
-//! stream (`TokensParserConfig`) in the same pass as parsing; comments are not
-//! tokens, so they are transparent to every lookup here.
+//! Exact token lookups by source offset. Comments are not tokens
+//! (`TokensParserConfig` collects the stream), so they are transparent to
+//! every lookup here.
 
 use std::cell::Cell;
 
@@ -10,8 +10,8 @@ use oxc_span::Span;
 pub struct TokenIndex<'a> {
     src: &'a str,
     tokens: &'a [Token],
-    /// Index hint for the next lookup. Walk queries cluster in source order,
-    /// so a galloping search from the last hit amortizes to near-zero.
+    /// Walk queries cluster in source order, so a galloping search from the
+    /// last hit amortizes to near-zero.
     hint: Cell<usize>,
 }
 
@@ -24,9 +24,8 @@ impl<'a> TokenIndex<'a> {
         }
     }
 
-    /// Partition point of a monotone predicate over the token slice, searched
-    /// by galloping outward from the last lookup hint before falling back to a
-    /// binary search inside the bracketed window.
+    /// Partition point over the token slice: gallop outward from the last
+    /// lookup hint, then binary-search inside the bracketed window.
     fn partition_point_hinted(&self, pred: impl Fn(&Token) -> bool, hint: usize) -> usize {
         let n = self.tokens.len();
         let probe = hint.min(n);
@@ -97,9 +96,9 @@ impl<'a> TokenIndex<'a> {
         (token.kind() == marker).then(|| token.span())
     }
 
-    /// Whether the text in [start, end) ends with `;` or a same-line `;`
-    /// directly follows it. Statement spans do not include the trailing
-    /// semicolon, so callers must also look at what comes after.
+    /// Whether [start, end) ends with `;` or a same-line `;` directly follows
+    /// it — statement spans exclude the trailing semicolon, so callers must
+    /// also look at what comes after.
     pub fn ends_with_semicolon(&self, start: u32, end: u32) -> bool {
         if let Some(token) = self.token_before(end)
             && token.kind() == Kind::Semicolon
