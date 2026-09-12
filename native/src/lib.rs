@@ -160,13 +160,26 @@ mod perf_bench {
     use crate::transpile::allocator_pool;
 
     fn corpus() -> String {
+        corpus_filtered(|_| true)
+    }
+
+    /// Same corpus without the enum-declaring files: no text splices occur,
+    /// so the output side takes the in-place rewrite path.
+    fn corpus_without_enums() -> String {
+        corpus_filtered(|content| !content.contains("enum "))
+    }
+
+    fn corpus_filtered(keep: impl Fn(&str) -> bool) -> String {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test/fixture");
         let mut out = String::new();
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|e| e == "ts") {
-                out.push_str(&fs::read_to_string(path).unwrap());
-                out.push('\n');
+                let content = fs::read_to_string(path).unwrap();
+                if keep(&content) {
+                    out.push_str(&content);
+                    out.push('\n');
+                }
             }
         }
         out
@@ -211,16 +224,39 @@ mod perf_bench {
         while corpus.len() < 100_000 {
             corpus.push_str(&original);
         }
-        println!("input: {} bytes", corpus.len());
+        let original_plain = corpus_without_enums();
+        let mut corpus_plain = original_plain.clone();
+        while corpus_plain.len() < 100_000 {
+            corpus_plain.push_str(&original_plain);
+        }
+        println!(
+            "input: {} bytes ({} without enums)",
+            corpus.len(),
+            corpus_plain.len()
+        );
 
         transpile_for_bench(&corpus);
+        transpile_for_bench(&corpus_plain);
 
-        let iters = 100;
+        let iters = std::env::var("PERF_ITERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(100);
         let pool = allocator_pool();
         let (p_min, p_mean) = time_it(iters, || parse_only(pool, &corpus, false));
         let (pt_min, pt_mean) = time_it(iters, || parse_only(pool, &corpus, true));
+        // the input copy stands in for the JS-string → Rust-String copy the
+        // napi boundary always performs; timed separately so the pipeline
+        // cost (flatten + walk + output) can be derived by subtraction
+        let (c_min, c_mean) = time_it(iters, || {
+            let copy = corpus.clone();
+            std::hint::black_box(&copy);
+        });
         let (t_min, t_mean) = time_it(iters, || {
             transpile_for_bench(&corpus);
+        });
+        let (tp_min, tp_mean) = time_it(iters, || {
+            transpile_for_bench(&corpus_plain);
         });
         println!(
             "parse-only      min={:>5}us mean={:>5}us",
@@ -233,9 +269,19 @@ mod perf_bench {
             pt_mean / 1000
         );
         println!(
-            "full transpile  min={:>5}us mean={:>5}us",
+            "input copy      min={:>5}us mean={:>5}us",
+            c_min / 1000,
+            c_mean / 1000
+        );
+        println!(
+            "full transpile  min={:>5}us mean={:>5}us  (enum corpus, output fallback path)",
             t_min / 1000,
             t_mean / 1000
+        );
+        println!(
+            "no-enum variant min={:>5}us mean={:>5}us  (output rewrites in place)",
+            tp_min / 1000,
+            tp_mean / 1000
         );
     }
 
