@@ -2,7 +2,8 @@
  * The vendored tsx corpus: syntactic case files selected from the official
  * TypeScript conformance suite (tests/cases/conformance/jsx, pinned to
  * v6.0.3 — the version this repository's `typescript` devDependency tracks).
- * Files are © Microsoft Corporation, MIT-licensed, vendored verbatim; the
+ * Files are © Microsoft Corporation, Apache-2.0-licensed, vendored
+ * verbatim (see fixture/tsx-corpus/LICENSE); the
  * TypeScript test directives they open with are inert comments here.
  *
  * Selection: 70 of the suite's 195 files. The ~125 exclusions are all

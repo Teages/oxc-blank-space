@@ -1,8 +1,6 @@
 # petrea
 
-[![pkg.pr.new](https://pkg.pr.new/badge/Teages/petrea)](https://pkg.pr.new/~/Teages/petrea)
-
-A small, fast type-stripper that blanks TypeScript-only syntax using the [oxc parser](https://oxc.rs), leaving valid JavaScript with identical line and column positions. A drop-in reimplementation of [ts-blank-space](https://github.com/bloomberg/ts-blank-space) on the oxc parser instead of the TypeScript compiler.
+A small, fast type-stripper that blanks TypeScript-only syntax using the [oxc parser](https://oxc.rs), leaving valid JavaScript with identical line and column positions.
 
 ## Install
 
@@ -19,18 +17,13 @@ console.log(await transpile(`const a: number = 1`))
 // result: `const a         = 1`
 ```
 
-`transpileSync` offers the same behavior synchronously. `transpile` works in
-Node and in browsers. In Node it runs on a native binding for the current
-platform; when bundled for the browser, bundlers resolve the same import to
-a WebAssembly build through the standard `browser` condition — no
-configuration needed. To force the WebAssembly build explicitly (e.g. in
-tooling without a `browser` condition), use the `petrea/wasm` entry:
+`transpileSync` offers a synchronous alternative to `transpile`.
 
 ```ts
-import { transpile } from 'petrea/wasm'
+import { transpileSync } from 'petrea'
 
-await transpile(`const a: number = 1`)
-// 'const a         = 1'
+console.log(transpileSync(`const a: number = 1`))
+// result: `const a         = 1`
 ```
 
 ## License

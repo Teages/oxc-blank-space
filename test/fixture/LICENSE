@@ -1,5 +1,7 @@
 The files in this directory are derived from the ts-blank-space test
-fixtures (https://github.com/bloomberg/ts-blank-space).
+fixtures (https://github.com/bloomberg/ts-blank-space), except the
+tsx-corpus/ subdirectory, which is vendored from the TypeScript
+conformance suite and carries its own LICENSE.
 
 Copyright 2024 Bloomberg Finance L.P.
 
