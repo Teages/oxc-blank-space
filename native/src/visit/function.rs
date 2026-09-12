@@ -106,7 +106,7 @@ fn visit_function_parts<'a>(
         }
         if is_arrow && arrow_return_type_spans_lines(w, params, rt, open_paren, node_start) {
             // Danger! A newline between the parameters and `=>` would make the
-            // output an invalid arrow function, so move the `)` next to `=>`.
+            // output an invalid arrow function — move the `)` next to `=>`.
             let closing_paren = find_closing_paren(w, params, open_paren, node_start);
             if closing_paren >= 0 {
                 w.blanker
@@ -143,9 +143,9 @@ fn visit_body<'a>(w: &mut Walker<'a>, body: Option<&BodyRef<'a>>) {
     }
 }
 
-/// Erase a `<T>` span; when it spans lines before the parameter list, start the
-/// blank with `(` and blank the original `(` so the parens stay balanced on the
-/// first line.
+/// Erase a `<T>` span; when it spans lines before the parameter list, start
+/// the blank with `(` and blank the original `(` so the parens stay balanced
+/// on the first line.
 pub(crate) fn blank_type_parameters(
     w: &mut Walker<'_>,
     type_parameters: &TSTypeParameterDeclaration<'_>,
@@ -179,8 +179,8 @@ fn arrow_return_type_spans_lines(
     w.blanker.tokens.spans_lines(params_end, return_type_end)
 }
 
-/// End of the last parameter (rest included), or
-/// the position right after `(` / the node start when there are none.
+/// End of the last parameter (rest included), or the position right after
+/// `(` / the node start when there are none.
 fn last_param_end(params: &FormalParameters<'_>, open_paren: i64, node_start: u32) -> u32 {
     params
         .rest

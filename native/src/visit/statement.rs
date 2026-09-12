@@ -2,7 +2,7 @@ use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 
 use super::walk::{VisitResult, Walker};
-use super::{class, enum_exp, function, namespace};
+use super::{class, enums, function, namespace};
 
 pub(crate) fn visit_import_declaration<'a>(
     w: &mut Walker<'a>,
@@ -23,8 +23,8 @@ pub(crate) fn visit_import_declaration<'a>(
     VisitResult::Js
 }
 
-/// Specifier-only export declarations: `export { a }` and
-/// `export { a } from 'mod'` are distinct shapes in the native AST.
+/// Specifier-only export declarations: `export { a }` and `export { a } from
+/// 'mod'` are distinct shapes in the native AST.
 pub(crate) fn visit_export_specifiers(
     w: &mut Walker<'_>,
     span: Span,
@@ -87,7 +87,7 @@ pub(crate) fn visit_exported_declaration<'a>(
                 w.blanker.blank_statement(wrapper);
                 VisitResult::Blanked
             } else {
-                enum_exp::expand_enum(w, declaration);
+                enums::exp::expand_enum(w, declaration);
                 VisitResult::Js
             }
         }

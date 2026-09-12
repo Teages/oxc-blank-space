@@ -1,81 +1,65 @@
-//! The collection pre-pass: register every name binding and every enum
-//! declaration into the merge-group tables before any emission, mirroring
-//! TypeScript's whole-file member resolution.
+//! The collection pre-pass: register every name binding and enum declaration
+//! into the merge-group tables before any emission, mirroring TypeScript's
+//! whole-file member resolution.
 //!
-//! Two tiers. Every enum-declaring file registers its enum declarations
-//! and evaluates members — literals and references to the enum's own
-//! group resolve through the member tables alone, no scope model needed.
-//! The whole-file binding registry and the scope array exist only when a
-//! reference may reach outside the enum's members (a `const`, an outer
-//! enum, a shadowing parameter — or a member reference inside a
-//! non-folding initializer, which qualification resolves): such files
-//! re-run this pass with the scope array installed.
-//!
-//! Enum member evaluation runs to a fixed point: one pass in source order
-//! cannot resolve reference chains whose links are declared later in the
-//! file (`F.A → E.B → G.C`), so evaluation repeats until no new value
-//! appears. `const` bindings resolve lazily inside those rounds — only
-//! the declarations an enum actually references are ever evaluated, and
-//! each resolves once per session regardless of chain depth.
+//! Two tiers: own-group references resolve through the member tables alone;
+//! the whole-file binding registry and scope array join only when a reference
+//! may reach outside the enum's members (the pass then re-runs with the scope
+//! array installed). Evaluation runs to a fixed point — one source-order pass
+//! cannot resolve reference chains declared later in the file
+//! (`F.A → E.B → G.C`); `const` bindings resolve lazily inside those rounds.
 
 use std::collections::HashMap;
 
 use oxc_ast::AstKind;
 use oxc_ast::ast::{Expression, TSEnumDeclaration};
 
-use super::enum_fold::eval_constant;
-use super::enum_fold_string::eval_string_constant;
-use super::enum_model::{
+use super::fold::eval_constant;
+use super::fold_string::eval_string_constant;
+use super::model::{
     ConstBinding, ConstBindings, ConstCache, DeclarationMembers, EnumDeclarations, EnumMembers,
     MemberValue, ResolveSession, StringMember, scope_chain_of,
 };
-use super::enum_register;
-use super::enum_text::{SourceText, string_literal_value_units};
-use super::walk::{Walker, expr_index};
+use super::register;
+use super::text::{SourceText, string_literal_value_units};
+use crate::visit::walk::{Walker, expr_index};
 
-/// One round's evaluated members for a single enum declaration, owned —
-/// the evaluation borrows the frozen table, the merge that follows
-/// mutates it, so only owned data crosses that line.
+/// One round's evaluated members for a single enum declaration, owned — the
+/// evaluation borrows the frozen table, the merge that follows mutates it.
 struct RoundResult {
     constants: HashMap<Vec<u16>, f64>,
     strings: HashMap<Vec<u16>, StringMember>,
 }
 
-/// One enum declaration on the evaluation list, with its member names
-/// computed once at registration (evaluations re-run per dependency
-/// round; the names never change).
+/// One enum declaration on the evaluation list, its member names computed
+/// once at registration (evaluations re-run per round; names never change).
 struct Declaration<'a> {
     index: u32,
     node: &'a TSEnumDeclaration<'a>,
     member_names: Vec<Vec<u16>>,
-    /// the merge-group key, built once at registration and reused by the
-    /// classification and every evaluation round
+    /// the merge-group key, built once at registration
     group_key: (u32, String),
 }
 
-/// One member of one declaration: its name (computed once at
-/// registration) and its fold, in declaration order. The fold reuses
-/// [`MemberValue`] — it is the same value/shape pair the resolver
-/// produces, so emission never re-evaluates an initializer.
+/// One member of one declaration: its name and its fold, in declaration
+/// order. The fold reuses [`MemberValue`] — emission never re-evaluates.
 #[derive(Clone, Debug)]
 pub(crate) struct MemberRecord {
     pub name: Vec<u16>,
     pub fold: Option<MemberValue>,
 }
 
-/// What the collection pass produced, and whether binding resolution (or
+/// What the collection pass produced, plus whether binding resolution (or
 /// member qualification) needs the scope model it did not have.
 pub(crate) struct CollectResult<'a> {
     pub table: HashMap<(u32, String), EnumMembers>,
     pub bindings: ConstBindings<'a>,
-    /// Per declaration (flat index), each member's name and fold in
-    /// declaration order — a `None` fold is a runtime read (an
-    /// initializer that did not fold) or an uninitialized member the
+    /// Per declaration (flat index), each member's fold in declaration order —
+    /// a `None` fold is a runtime read, or an uninitialized member whose
     /// auto-increment chain could not continue.
     pub folds: HashMap<u32, Vec<MemberRecord>>,
     /// Set when a reference escaped the enum's own members: the caller
-    /// installs the scope array and runs the pass again, with the
-    /// whole-file binding registry in place.
+    /// installs the scope array and re-runs the pass.
     pub needs_scope_model: bool,
 }
 
@@ -90,20 +74,19 @@ pub(crate) fn collect_enum_declarations<'a>(
     };
     let mut folds: HashMap<u32, Vec<MemberRecord>> = HashMap::new();
     let mut needs_scope_model = false;
-    // the scope array exists only on the second (heavy) run; without it
-    // no binding registration is possible — or needed
+    // the scope array exists only on the heavy run; without it no binding
+    // registration is possible — or needed
     let light = w.node_scope.is_empty();
 
-    // Enum declarations first, in source order: merge-group slots and the
-    // emit flags (see [`super::enum_register`]); the member-scope and
-    // shadow bindings join once the scope array exists.
+    // Enum declarations first, in source order: merge-group slots and emit
+    // flags; member-scope and shadow bindings join once the scope array exists.
     let mut enum_declarations: Vec<Declaration<'a>> = Vec::new();
     for &index in enum_indices {
-        if let Some(enum_register::EnumRegistration {
+        if let Some(register::EnumRegistration {
             node,
             member_names,
             group_key,
-        }) = enum_register::register_enum_declaration(w, index, &mut table, &mut bindings)
+        }) = register::register_enum_declaration(w, index, &mut table, &mut bindings)
         {
             enum_declarations.push(Declaration {
                 index,
@@ -115,9 +98,8 @@ pub(crate) fn collect_enum_declarations<'a>(
     }
 
     if light {
-        // Self-containment check: a bare reference (beyond the enum's own
-        // name) that is not a member of its group may reach an outer
-        // const — folding it right needs the binding registry.
+        // Self-containment check: a bare reference that is not a member of its
+        // group may reach an outer const — folding it right needs the registry.
         for declaration in &enum_declarations {
             let node = declaration.node;
             let group = table.get(&declaration.group_key);
@@ -141,20 +123,17 @@ pub(crate) fn collect_enum_declarations<'a>(
         // the heavy run: every other binding joins the registry, in source
         // order
         for index in 0..w.node_count() {
-            enum_register::register_other_node(w, index as u32, &mut bindings);
+            register::register_other_node(w, index as u32, &mut bindings);
         }
     }
 
-    // Dependency-driven evaluation: each declaration evaluates once and
-    // merges immediately (an in-order dependency chain resolves in one
-    // pass); a merge that lands fresh values re-queues exactly the
-    // declarations whose evaluation read that group, so backward chains
-    // resolve member by member without re-evaluating everything. Values
-    // only ever join the tables and only fresh values re-queue, so the
-    // queue drains — circular references, which resolve nothing, simply
-    // never re-queue. The const cache persists across the run; its
-    // entries carry dependency sets, so consts blocked on a
-    // not-yet-resolved member retry when it lands.
+    // Dependency-driven evaluation: each declaration evaluates once and merges
+    // immediately; a merge landing fresh values re-queues exactly the
+    // declarations whose evaluation read that group, so backward chains resolve
+    // member by member. Values only ever join the tables and only fresh values
+    // re-queue, so the queue drains — circular references never re-queue. The
+    // const cache persists across the run; entries carry dependency sets, so
+    // consts blocked on a not-yet-resolved member retry when it lands.
     let cache = ConstCache::default();
     let mut dependents: HashMap<(u32, String), Vec<usize>> = HashMap::new();
     let mut queue: std::collections::VecDeque<usize> = (0..enum_declarations.len()).collect();
@@ -191,18 +170,16 @@ pub(crate) fn collect_enum_declarations<'a>(
         table,
         bindings,
         folds,
-        // on the heavy run the scope model is already installed — the
-        // flag has nothing left to request
+        // on the heavy run the scope model is already installed — nothing left to request
         needs_scope_model: needs_scope_model && light,
     }
 }
 
 /// Whether `init`'s subtree contains a bare value reference other than the
-/// enum's own name. With `group`, references to the group's own member
-/// names pass (they resolve through the member tables); without it every
-/// reference counts — a non-folding initializer's member references go
-/// through the qualification walk, which reads the scope model. Type
-/// positions hold no value references and are skipped.
+/// enum's own name. With `group`, references to the group's own member names
+/// pass (they resolve through the member tables); without it every reference
+/// counts — a non-folding initializer's member references go through the
+/// qualification walk, which reads the scope model. Type positions are skipped.
 fn initializer_references(
     w: &Walker<'_>,
     init: &Expression<'_>,
@@ -237,18 +214,15 @@ fn initializer_references(
 
 impl<'a, 'b> ResolveSession<'a, 'b> {
     /// The compile-time value of a variable reference along `chain`: the
-    /// innermost binding of the name wins — a `const` declaration
-    /// resolves lazily (memoized), any other binding stops the search,
-    /// and an unbound name falls through to the next scope. The name
-    /// arrives both ways identifier references have it on hand: the AST's
-    /// string for binding lookups, and UTF-16 units for member tables
-    /// (whose keys may be non-identifier strings).
+    /// innermost binding wins — a `const` resolves lazily (memoized), any
+    /// other binding stops the search, an unbound name falls through. The
+    /// name arrives in both forms identifier references have on hand: the
+    /// AST's string for binding lookups, UTF-16 units for member tables.
     pub fn lookup(&self, chain: &[u32], name_str: &str, name: &[u16]) -> Option<MemberValue> {
         for scope in chain {
-            // an enum member scope: a member binding resolves through the
-            // enum tables (folded value, or nothing when the member's
-            // value does not fold — either way the member hides outer
-            // bindings), any other name falls through
+            // an enum member scope: a member binding resolves through the enum
+            // tables (or nothing when it does not fold) — either way it hides
+            // outer bindings; any other name falls through
             if let Some(group) = self.bindings.enum_scopes.get(scope)
                 && let Some(members) = self.enums.get(group)
             {
@@ -269,17 +243,15 @@ impl<'a, 'b> ResolveSession<'a, 'b> {
         None
     }
 
-    /// Resolve one const declaration's value, memoized. The initializer
-    /// evaluates through a declaration view whose scope chain is the
-    /// declaration's own, so references inside it resolve from where it
-    /// stands; re-entrance (a circular chain) resolves to nothing.
+    /// Resolve one const declaration's value, memoized; references inside it
+    /// resolve from where the declaration stands; circular chains resolve to
+    /// nothing.
     fn resolve_decl(&self, scope: u32, name: &str) -> Option<MemberValue> {
         let key = (scope, name.to_string());
         if let Some(cached) = self.cache.values.borrow().get(&key) {
-            // a hit must not detach this reader from the groups the
-            // resolution read: its dependencies propagate to this
-            // session, so a value landing later wakes this declaration
-            // even though the cache answered
+            // a hit must still propagate its dependency groups to this session,
+            // so a value landing later wakes this declaration even though the
+            // cache answered
             self.touched
                 .borrow_mut()
                 .extend(cached.deps.iter().cloned());
@@ -304,8 +276,7 @@ impl<'a, 'b> ResolveSession<'a, 'b> {
             resolver: self,
             scope_chain,
         };
-        // no enclosing enum and no self member: empty names never match
-        // a reference, so both guards are inert
+        // no enclosing enum and no self member: empty names never match a reference
         let members = DeclarationMembers::default();
         let value = eval_constant(initializer, "", &declarations, &members, &[])
             .map(MemberValue::Number)
@@ -323,7 +294,6 @@ impl<'a, 'b> ResolveSession<'a, 'b> {
     }
 }
 
-/// The walker's source decoding context.
 fn enum_text_source<'a>(w: &Walker<'a>) -> SourceText<'a> {
     SourceText {
         src: w.src,
@@ -332,10 +302,9 @@ fn enum_text_source<'a>(w: &Walker<'a>) -> SourceText<'a> {
     }
 }
 
-/// Evaluate one declaration's members into an incremental layer, reading
-/// the frozen table through the session. Also reports whether a
-/// non-folding initializer holds a member reference — its qualification
-/// walk reads the scope model (see [`initializer_references`]).
+/// Evaluate one declaration's members into an incremental layer. Also reports
+/// whether a non-folding initializer holds a member reference — its
+/// qualification walk reads the scope model (see [`initializer_references`]).
 fn eval_declaration(
     w: &Walker<'_>,
     table: &HashMap<(u32, String), EnumMembers>,
@@ -405,9 +374,9 @@ fn eval_declaration(
             previous = None;
         } else if let Some(value) = previous
             // an uninitialized member of a plain ambient enum reads at
-            // runtime — the ambient object exists elsewhere, so its value
-            // is not a compile-time constant. An ambient *const* enum
-            // inlines every member, so there the increment does fold.
+            // runtime — the ambient object exists elsewhere, so it is not a
+            // compile-time constant. An ambient *const* enum inlines every
+            // member, so there the increment does fold.
             && !(node.declare && !node.r#const)
         {
             let value = value + 1.0;
@@ -436,16 +405,14 @@ fn eval_declaration(
     }
 }
 
-/// One evaluated declaration plus its per-member folds and scope-model
-/// classification.
+/// One evaluated declaration: its per-member folds and scope-model classification.
 struct EvaluatedRound {
     result: RoundResult,
     folds: Vec<MemberRecord>,
     needs_scope_model: bool,
 }
 
-/// Merge one round's evaluated declaration into its group entry,
-/// returning how many member values were newly resolved.
+/// Merge one round into its group entry; returns how many values were newly resolved.
 fn merge_round(
     table: &mut HashMap<(u32, String), EnumMembers>,
     key: &(u32, String),

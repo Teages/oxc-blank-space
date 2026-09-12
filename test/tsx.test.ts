@@ -259,13 +259,10 @@ describe('runtime-equivalence layer guards', () => {
   })
 
   it('pins the tsc behavior cited by the unicode-escape divergence note', () => {
-    // Given: unicode escapes in JSX tag names — the divergence notes state
-    // that the reference compilers reject them with TS17021 (verified
-    // against tsc 6.0.3 and tsgo 7.0.2 CLI; the installed devDependency
-    // pins the tsc side of that claim in-suite)
-    // When/Then: the tsc-based evaluation layer refuses the input with the
-    // documented diagnostic — if a typescript upgrade ever accepts this, the
-    // divergence notes must be revisited
+    // the reference compilers reject these with TS17021 (verified against tsc
+    // 6.0.3 and tsgo 7.0.2 CLI; the installed devDependency pins the tsc side
+    // in-suite) — if a typescript upgrade ever accepts this, the divergence
+    // notes must be revisited
     expect(() => evaluateWithTsc('const el = <\\u0061>hi</\\u0061>;\n')).toThrow(
       /Unicode escape sequence/,
     )

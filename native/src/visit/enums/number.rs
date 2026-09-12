@@ -5,16 +5,11 @@
 /// `String(value)` — the JS `Number::toString` algorithm.
 ///
 /// Shortest round-trip digits come from `dtoa` (the double-conversion
-/// algorithm V8 also uses). Shortest digits are not always unique: when the
-/// value lies exactly halfway between two same-length decimals, ECMAScript
-/// mandates the candidate with an even digit string ("round half to even")
-/// while the generation algorithms round half away from zero — the source of
-/// the `1381472817847324.2` vs `.3` divergence. Exact ties are detected with
-/// integer arithmetic on the value's binary decomposition (|v| = odd m x 2^e:
-/// a tie at decimal shift d = n - k exists iff d == e + 1, m is odd, and
-/// 5^(-d) divides m when d < 0), and the digits are bumped to their even
-/// neighbor. The digits are then laid out per the ECMAScript specification
-/// (decimal form for -6 < n <= 21, exponential otherwise).
+/// algorithm V8 also uses); they are not always unique — when the value lies
+/// exactly halfway between two same-length decimals, ECMAScript mandates the
+/// even digit string ("round half to even") while generation rounds half away
+/// from zero, the source of the `1381472817847324.2` vs `.3` divergence (see
+/// [`is_exact_tie`]). Layout is decimal for -6 < n <= 21, exponential otherwise.
 pub(super) fn js_number_to_string(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
@@ -48,7 +43,7 @@ pub(super) fn js_number_to_string(value: f64) -> String {
     format!("{negative_prefix}{layout}")
 }
 
-/// Lay the decimal digits out per ECMAScript: `|value| = digits x 10^(-d)`
+/// Lay the decimal digits out per ECMAScript: `|value| = digits x 10^(-d)`,
 /// with the digit count folded into n = k + d.
 fn layout_digits(digits_int: u64, d: i32) -> String {
     let digits = digits_int.to_string();
@@ -119,8 +114,7 @@ fn tie_partner(v: f64, digits: u64, d: i32) -> u64 {
     }
 }
 
-/// Exact binary decomposition of a finite positive double: |v| = m x 2^e with
-/// m odd. Returns (m, e).
+/// Exact binary decomposition of a finite positive double: |v| = m x 2^e, m odd.
 fn odd_decomposition(v: f64) -> (u64, i32) {
     let bits = v.to_bits();
     let biased = ((bits >> 52) & 0x7ff) as i32;
@@ -143,9 +137,8 @@ fn odd_decomposition(v: f64) -> (u64, i32) {
 /// close). Requires `digits` to be the shortest round-trip digits of `|v|`.
 fn is_exact_tie(v: f64, d: i32) -> bool {
     let (m, e) = odd_decomposition(v);
-    // |v| x 2 x 10^(-d) = m x 2^(e + 1 - d) x 5^(-d) — an odd integer
-    // requires the power of two to vanish, an odd mantissa, and no 5s in the
-    // denominator.
+    // |v| x 2 x 10^(-d) = m x 2^(e + 1 - d) x 5^(-d) — an odd integer requires
+    // the power of two to vanish, an odd mantissa, and no 5s in the denominator.
     if e + 1 - d != 0 || m % 2 == 0 {
         return false;
     }

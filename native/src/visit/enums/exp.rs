@@ -1,22 +1,14 @@
-//! Enums have runtime behavior, so instead of being blanked they are
-//! expanded in place into the same IIFE shape the TypeScript compiler
-//! emits:
+//! Enums have runtime behavior, so instead of being blanked they are expanded
+//! in place into the same IIFE shape the TypeScript compiler emits:
 //!
-//! ```ts
-//! enum Color { Red, Green = 5 }
-//! ```
 //! ```js
 //! var  Color; (function (Color) { Color[Color["Red"] = 0] = "Red";
 //! Color[Color["Green"] = 5] = "Green" })(Color || (Color = {}));
 //! ```
 //!
-//! This module emits each declaration's IIFE — folding initializers
-//! through [`super::enum_fold`]/[`super::enum_fold_string`] and qualifying
-//! member references through [`super::enum_qualify`], over the group
-//! tables [`super::enum_collect`] gathered. The surrounding text (braces,
-//! whitespace, comments between members) is kept; only the keyword, the
-//! name and the members are rewritten, so the output length may differ
-//! from the input. `const enum` is expanded the same way so that
+//! Surrounding text (braces, whitespace, comments between members) is kept —
+//! only the keyword, the name and the members are rewritten, so the output
+//! length may differ from the input. `const enum` expands the same way so
 //! untouched use sites (`CE.A`) keep resolving at runtime.
 
 use std::rc::Rc;
@@ -26,13 +18,13 @@ use oxc_ast::ast::*;
 use oxc_parser::Kind;
 use oxc_span::GetSpan;
 
-use super::enum_fold_string::is_string_typed;
-use super::enum_model::MemberValue;
-use super::enum_model::{DeclarationMembers, enum_group_scope, is_block_scoped};
-use super::enum_number::js_number_to_string;
-use super::enum_qualify::{QualifyContext, QualifyState, qualify_expr};
-use super::enum_text::{json_quote, json_quote_utf16, string_literal_value_units};
-use super::walk::{Walker, expr_index};
+use super::fold_string::is_string_typed;
+use super::model::MemberValue;
+use super::model::{DeclarationMembers, enum_group_scope, is_block_scoped};
+use super::number::js_number_to_string;
+use super::qualify::{QualifyContext, QualifyState, qualify_expr};
+use super::text::{json_quote, json_quote_utf16, string_literal_value_units};
+use crate::visit::walk::{Walker, expr_index};
 
 pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     let enum_index = node.node_id.get().index() as u32;
@@ -41,19 +33,16 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     let key = (enum_group_scope(w, enum_index), enum_name.clone());
     let entry = w.enum_members.get(&key);
 
-    // `let` for enums directly inside a block, function body, namespace or
-    // catch clause — any container but the program — so a shadowing enum
-    // cannot clobber the outer binding through var hoisting; `var` at
-    // program scope. Mirrors the TypeScript emitter.
+    // `let` at any container but the program — a shadowing enum must not
+    // clobber the outer binding through var hoisting (mirrors tsc).
     let keyword = if is_block_scoped(w, enum_index) {
         "let "
     } else {
         "var "
     };
 
-    // TypeScript exports a merged enum once: only the group's first
-    // exported declaration keeps its `export` keyword, and only the
-    // group's first declaration emits the binding.
+    // TypeScript exports a merged enum once: only the group's first exported
+    // declaration keeps `export`, only the first declaration emits the binding.
     let exported = matches!(
         w.node_kind(w.parent_of(enum_index)),
         AstKind::ExportDeclaration(_)
@@ -63,8 +52,7 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
     let is_first_declaration =
         entry.and_then(|members| members.first_declaration_start) == Some(declaration_start);
 
-    // `enum` keyword — for `const enum` the node span starts at `const`, which
-    // is erased together with the keyword.
+    // for `const enum` the node span starts at `const`, erased with the keyword
     let first = w.blanker.tokens.token_from(node.span().start);
     let keyword_token = match first {
         Some(token) if token.kind() == Kind::Const => w.blanker.tokens.token_from(token.span().end),
@@ -85,8 +73,7 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
             format!("{enum_name}; (function ({enum_name})"),
         );
     } else if carries_export {
-        // a later exported declaration in a group whose export landed here:
-        // emit the binding with this declaration's `export` keyword
+        // a later declaration carrying the group's export: emit the binding here
         w.blanker
             .output
             .override_range(node.span().start, keyword_token.span().end, "var ");
@@ -96,8 +83,8 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
             format!("{enum_name}; (function ({enum_name})"),
         );
     } else {
-        // a later declaration appends only its members: the binding (and
-        // its export, if any) belong to an earlier declaration
+        // a later declaration appends only its members: the binding belongs
+        // to an earlier declaration
         let head_start = if exported {
             w.node_kind(w.parent_of(enum_index)).span().start
         } else {
@@ -107,9 +94,8 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
             .output
             .override_range(head_start, node.id.span().start, "");
         // ASI protection: the appended IIFE starts with `(`, which would
-        // continue a preceding statement that lacks a trailing semicolon
-        // (`const x = 1 (function ...) ...`) — a leading `;` starts a fresh
-        // statement, the same guard erased statements emit
+        // continue a preceding statement lacking `;` (`const x = 1 (function
+        // ...) ...`) — a leading `;` starts a fresh statement
         let separator = if w.blanker.semicolon_needed { ";" } else { "" };
         w.blanker.output.override_range(
             node.id.span().start,
@@ -118,13 +104,6 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
         );
     }
 
-    // Member emission reads the folds the collection pass decided (see
-    // [`super::enum_collect::MemberFold`]) — only the runtime branch
-    // re-walks its initializer, erasing TS syntax and qualifying member
-    // references. The group table is shared through the walker's `Rc`
-    // (cheap refcount, no per-declaration deep clone); this declaration's
-    // members resolve through it — earlier declarations of the same enum
-    // merged into it already.
     // each declaration emits once: take its records instead of cloning
     let records = w.enum_folds.remove(&enum_index).unwrap_or_default();
     // clones of the shared tables keep the mutable walk below free of
@@ -145,12 +124,9 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
 
         match record.fold {
             Some(MemberValue::Str(value)) => {
-                // String-valued members emit a plain property assignment
-                // without reverse mapping when their type is a string
-                // literal (TypeScript emitter shape); the raw value text
-                // of a plain literal comes from the original code units on
-                // the UTF-16 path — the lossy parse copy would corrupt raw
-                // lone surrogates. A folded non-literal (asserted) string
+                // String-literal members keep their raw source text (the lossy
+                // parse copy would corrupt lone surrogates) and emit the plain
+                // assignment shape; a folded non-literal (asserted) string
                 // keeps the numeric reverse-mapping form.
                 if let Some(Expression::StringLiteral(literal)) = initializer {
                     let raw_units = w.original_span_units(literal.span);
@@ -173,7 +149,6 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
                 }
             }
             Some(MemberValue::Number(value)) => {
-                // Constant initializers are emitted as the computed value.
                 w.blanker.output.override_range(
                     member_span.start,
                     member_span.end,
@@ -185,13 +160,9 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
             }
             None if initializer.is_some() => {
                 // Non-constant initializer: erase TS-only syntax with the
-                // normal walk (its blanks land between the two member text
-                // overrides below), then qualify bare references to
-                // sibling members with the enum name — except references
-                // an inner scope binds. A string-typed initializer (a
-                // template, a concatenation) keeps the plain assignment
-                // shape — no reverse mapping over its runtime string
-                // result, like the TypeScript emitter.
+                // normal walk, then qualify bare sibling references — except
+                // ones an inner scope binds. A string-typed initializer keeps
+                // the plain assignment shape, like the TypeScript emitter.
                 let init = initializer.expect("checked is_some");
                 let string_typed = is_string_typed(init);
                 let head = if string_typed {
@@ -229,9 +200,8 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
                     .override_range(init.span().end, member_span.end, tail);
             }
             None => {
-                // Auto-increment after a non-computable member — the input
-                // is a TypeScript compile error; mirror tsc's `undefined`
-                // emit.
+                // Auto-increment after a non-computable member — a TypeScript
+                // compile error; mirror tsc's `undefined` emit.
                 w.blanker.output.override_range(
                     member_span.start,
                     member_span.end,
@@ -257,12 +227,11 @@ pub(crate) fn expand_enum(w: &mut Walker<'_>, node: &TSEnumDeclaration<'_>) {
 }
 
 /// The quoted enum property key (`JSON.stringify(memberName)` shape). The
-/// member name is decoded from the raw literal source — not the AST's lossy
-/// `value` string, which replaces lone-surrogate escapes with U+FFFD — as
-/// UTF-16 code units, so escaped lone surrogates (`"\uD800"`) re-emit exactly
-/// like `JSON.stringify` does: lowercase `\udXXXX`.
+/// member name is decoded from the raw literal source — the AST's lossy
+/// `value` replaces lone-surrogate escapes with U+FFFD — so `"\uD800"`
+/// re-emits exactly like `JSON.stringify`: lowercase `\udXXXX`.
 fn member_key<'a>(w: &Walker<'a>, member: &'a TSEnumMember<'a>) -> String {
-    let source = super::enum_text::SourceText {
+    let source = super::text::SourceText {
         src: w.src,
         units: w.units,
         byte_to_unit: w.byte_to_unit,

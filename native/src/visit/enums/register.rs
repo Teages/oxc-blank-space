@@ -1,9 +1,8 @@
 //! Registration of every name binding into the scope-keyed registry
-//! ([`ConstBindings`]): enum declarations and their member scopes,
-//! variables (with `var` hoisting and for-head rules), parameters, catch
-//! parameters, function/class names (declaration and expression forms),
-//! and imports. One pass in source order; the collection loop then
-//! evaluates against what this registered.
+//! ([`ConstBindings`]): enum declarations and their member scopes, variables
+//! (with `var` hoisting and for-head rules), parameters, catch parameters,
+//! function/class names (declaration and expression forms), and imports. One
+//! pass in source order; the collection loop evaluates against it.
 
 use std::collections::HashMap;
 
@@ -11,25 +10,24 @@ use oxc_ast::AstKind;
 use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 
-use super::enum_model::{
+use super::model::{
     ConstBinding, ConstBindings, EnumMembers, enum_group_scope, member_name_of, scope_above,
     scope_chain_of,
 };
-use super::walk::Walker;
+use crate::visit::walk::Walker;
 
-/// Register one enum declaration: its merge-group slot (first-declaration
-/// and first-export starts) always; its member-scope and shadow bindings
-/// only once the scope array exists — self-contained enums never read
-/// them. Returns the declaration and its member names (computed once
-/// here, reused by every evaluation round) for the caller's list.
-/// What registering one enum declaration yields: the node for the
-/// evaluation list, its member names, and its merge-group key.
+/// What registering one enum declaration yields: the node for the evaluation
+/// list, its member names, and its merge-group key.
 pub(super) struct EnumRegistration<'a> {
     pub node: &'a TSEnumDeclaration<'a>,
     pub member_names: Vec<Vec<u16>>,
     pub group_key: (u32, String),
 }
 
+/// Register one enum declaration: its merge-group slot (first-declaration
+/// and first-export starts) always; its member-scope and shadow bindings
+/// only once the scope array exists — self-contained enums never read them.
+/// Member names are computed once here, reused by every evaluation round.
 pub(super) fn register_enum_declaration<'a>(
     w: &Walker<'a>,
     idx: u32,
@@ -51,10 +49,9 @@ pub(super) fn register_enum_declaration<'a>(
     {
         entry.first_export_start = Some(node.span().start);
     }
-    // member names join up front (they are the declaration's own AST): the
-    // self-containment check reads them before any evaluation runs, and a
-    // reference to a not-yet-valued member must resolve as a member, not
-    // fall through to an outer binding
+    // member names join up front: the self-containment check reads them
+    // before any evaluation, and a reference to a not-yet-valued member must
+    // resolve as a member, not fall through to an outer binding
     let mut member_names = Vec::with_capacity(node.body.members.len());
     for member in &node.body.members {
         let name = member_name_of(w, member);
@@ -62,14 +59,13 @@ pub(super) fn register_enum_declaration<'a>(
         member_names.push(name);
     }
     if !w.node_scope.is_empty() {
-        // the member scope the declaration introduced: nested
-        // declarations resolve bare names through these members
+        // the member scope the declaration introduced: nested declarations
+        // resolve bare names through these members
         bindings
             .enum_scopes
             .insert(w.node_scope(idx), group.clone());
-        // the enum's own name binds in the statement list around
-        // it — a bare reference reads the runtime object, never
-        // an outer const
+        // the enum's own name binds in the statement list around it: a bare
+        // reference reads the runtime object, never an outer const
         bind_shadow(bindings, group_scope, node.id.name.as_str());
     }
     Some(EnumRegistration {
@@ -79,8 +75,8 @@ pub(super) fn register_enum_declaration<'a>(
     })
 }
 
-/// Register one flattened node's non-enum bindings (enum declarations are
-/// registered by [`register_enum_declaration`]).
+/// Register one flattened node's non-enum bindings (enums go through
+/// [`register_enum_declaration`]).
 pub(super) fn register_other_node<'a>(w: &Walker<'a>, idx: u32, bindings: &mut ConstBindings<'a>) {
     match w.node_kind(idx) {
         AstKind::VariableDeclaration(node) => {
@@ -105,8 +101,7 @@ pub(super) fn register_other_node<'a>(w: &Walker<'a>, idx: u32, bindings: &mut C
     }
 }
 
-/// Register `name` at `scope` as a shadow (a runtime read hiding any
-/// outer const of the same name).
+/// Register `name` at `scope` as a shadow (a runtime read hiding any outer const).
 fn bind_shadow<'a>(bindings: &mut ConstBindings<'a>, scope: u32, name: &'a str) {
     bindings
         .bindings
@@ -115,9 +110,9 @@ fn bind_shadow<'a>(bindings: &mut ConstBindings<'a>, scope: u32, name: &'a str) 
         .insert(name, ConstBinding::Shadow);
 }
 
-/// A declaration binds its name in the enclosing block; a named
-/// *expression* binds it in its parameter scope, which its body,
-/// defaults and nested scopes all nest inside.
+/// A declaration binds its name in the enclosing block; a named *expression*
+/// binds it in its parameter scope, which its body, defaults and nested
+/// scopes all nest inside.
 fn register_function_name<'a>(
     w: &Walker<'a>,
     idx: u32,
@@ -138,9 +133,9 @@ fn register_function_name<'a>(
     bind_shadow(bindings, scope, id.name.as_str());
 }
 
-/// The class scope covers every member position (methods, field
-/// initializers, static blocks); a declaration's name additionally binds
-/// in the enclosing block, one scope up.
+/// The class scope covers every member position (methods, field initializers,
+/// static blocks); a declaration's name additionally binds in the enclosing
+/// block, one scope up.
 fn register_class_name<'a>(
     w: &Walker<'a>,
     idx: u32,
@@ -179,17 +174,11 @@ fn register_imports<'a>(
     }
 }
 
-/// Register one variable declaration. A `const` declarator that binds a
-/// simple, annotation-free name with an initializer joins the fold
-/// candidates; every other bound name becomes a shadow marker — `let`/
-/// `var`, destructured or annotated consts — so a reference to it reads
-/// at runtime instead of reaching an outer `const` it hides.
-///
-/// Scopes: `let`/`const` bind in their enclosing scope — the loop-head
-/// scope for a for-head declaration, since the head sits inside the loop
-/// scope the flattener introduced; `var` hoists to the innermost
-/// function-like container (function body, static block, or program),
-/// including out of for heads.
+/// Register one variable declaration. A `const` declarator binding a simple,
+/// annotation-free name with an initializer joins the fold candidates; every
+/// other bound name becomes a shadow marker. `let`/`const` bind in their
+/// enclosing scope (the loop-head scope for a for-head); `var` hoists to the
+/// innermost function-like container, including out of for heads.
 fn register_variable<'a>(
     w: &Walker<'a>,
     index: u32,
@@ -222,9 +211,8 @@ fn register_variable<'a>(
 }
 
 /// Function parameters bind in the function's parameter scope (the
-/// FormalParameters node's own scope) — never compile-time constants, and
-/// they shadow outer consts for defaults, the body, and everything nested
-/// inside. The rest parameter binds the same way, through its pattern.
+/// FormalParameters node's own scope) — never compile-time constants,
+/// shadowing outer consts for defaults, the body, and everything nested.
 fn register_parameters<'a>(w: &Walker<'a>, index: u32, bindings: &mut ConstBindings<'a>) {
     let parameter_scope = w.node_scope(index);
     for child in w.children_of(index) {
@@ -240,8 +228,7 @@ fn register_parameters<'a>(w: &Walker<'a>, index: u32, bindings: &mut ConstBindi
     }
 }
 
-/// A catch parameter binds in the catch clause's own scope — it covers
-/// the parameter pattern's defaults and the body alike.
+/// A catch parameter binds in the catch clause's own scope — defaults and body alike.
 fn register_catch_parameter<'a>(
     w: &Walker<'a>,
     index: u32,
@@ -255,8 +242,7 @@ fn register_catch_parameter<'a>(
 }
 
 /// The scope serial a `var` declaration hoists into: the innermost
-/// function-like container at or above `index` (function bodies and
-/// static blocks are var environments; the program is the outermost).
+/// function-like container at or above `index` (the program is the outermost).
 fn var_scope_of(w: &Walker<'_>, index: u32) -> u32 {
     let mut cursor = index;
     while cursor != u32::MAX {

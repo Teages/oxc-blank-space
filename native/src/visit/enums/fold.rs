@@ -1,23 +1,20 @@
-//! Numeric constant folding of enum member initializers, like the
-//! TypeScript checker: literals, earlier member values (bare or through
-//! the enum object), and their unary/binary arithmetic combinations.
-//!
-//! Name, property and wrapper handling are shared with the string folder
-//! (see [`EnumDeclarations::resolve_name`], [`resolve_member`] and
-//! [`unwrap_transparent`]); only the arithmetic lives here.
+//! Numeric constant folding of enum member initializers, like the TypeScript
+//! checker: literals, earlier member values (bare or through the enum object),
+//! and their unary/binary arithmetic. Name, property and wrapper handling is
+//! shared with the string folder (see [`EnumDeclarations::resolve_name`],
+//! [`EnumDeclarations::resolve_member`] and [`unwrap_transparent`]); only the
+//! arithmetic lives here.
 
 use oxc_ast::ast::*;
 
-use super::enum_model::{
+use super::model::{
     DeclarationMembers, EnumDeclarations, MemberValue, Wrapper, unwrap_transparent,
 };
-use super::enum_number::{to_int32, to_uint32};
-use super::enum_text::string_literal_value_units;
+use super::number::{to_int32, to_uint32};
+use super::text::string_literal_value_units;
 
 /// Constant-fold an initializer for the auto-increment chain (JS semantics:
-/// all arithmetic happens on f64, bitwise operators go through ToInt32).
-/// Type assertions are transparent and sibling references through the enum
-/// object itself (`E.A`, `E["A"]`) resolve, like the TypeScript checker.
+/// f64 arithmetic, bitwise operators via ToInt32), like the TypeScript checker.
 pub(super) fn eval_constant(
     expr: &Expression<'_>,
     enum_name: &str,
@@ -27,9 +24,8 @@ pub(super) fn eval_constant(
 ) -> Option<f64> {
     use BinaryOperator as B;
     use Expression as E;
-    // parentheses and bare-operand assertions are transparent to a
-    // number; a non-null assertion (or a parenthesized operand under
-    // one) reads at runtime
+    // parentheses and bare-operand assertions are transparent to a number; a
+    // non-null assertion (or a parenthesized operand under one) reads at runtime
     let (expr, wrapper) = unwrap_transparent(expr);
     if matches!(wrapper, Wrapper::Runtime) {
         return None;
@@ -40,8 +36,7 @@ pub(super) fn eval_constant(
         E::Identifier(identifier) => {
             let name_str = identifier.name.as_str();
             let name = name_str.encode_utf16().collect::<Vec<u16>>();
-            // a member binding its own name never folds — a self
-            // reference reads at runtime
+            // a member binding its own name never folds — a self reference reads at runtime
             if name != self_name
                 && let Some(MemberValue::Number(value)) =
                     declarations.resolve_name(name_str, &name, members)
@@ -51,8 +46,8 @@ pub(super) fn eval_constant(
                 None
             }
         }
-        // `E.A` / `E["A"]` — through this enum object, or any already
-        // expanded enum (TypeScript folds cross-enum member references)
+        // through this enum object, or any already expanded enum (TypeScript
+        // folds cross-enum member references)
         E::StaticMemberExpression(member) => {
             let E::Identifier(object) = &member.object else {
                 return None;
@@ -74,8 +69,8 @@ pub(super) fn eval_constant(
             else {
                 return None;
             };
-            // decode from the raw source: the AST's value is lossy
-            // for lone surrogates, which name distinct members
+            // decode from the raw source: the AST's value is lossy for lone
+            // surrogates, which name distinct members
             let property = string_literal_value_units(&declarations.resolver.source, literal);
             match declarations.resolve_member(object.name.as_str(), &property, enum_name, members) {
                 Some(MemberValue::Number(value)) => Some(value),
