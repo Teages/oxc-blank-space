@@ -64,18 +64,8 @@ fn resolve_filename(options: Option<&TranspileNativeOptions>) -> String {
 }
 
 /// The API contract (`types.ts`) promises JS string indices (UTF-16 code
-/// units); internal spans are UTF-8 bytes, so convert.
-fn utf16_offset(input: &str, byte_offset: u32) -> u32 {
-    if input.is_ascii() {
-        return byte_offset;
-    }
-    let mut offset = byte_offset as usize;
-    while offset > 0 && !input.is_char_boundary(offset) {
-        offset -= 1;
-    }
-    input[..offset].chars().map(|c| c.len_utf16() as u32).sum()
-}
-
+/// units); internal spans are UTF-8 bytes, so `transpile` converts the report
+/// offsets itself while the input is still alive.
 fn to_napi_units_result(
     output: std::result::Result<transpile::TranspileUnitsOutput, String>,
 ) -> Result<TranspileUnitsResult> {
@@ -95,7 +85,6 @@ fn to_napi_units_result(
 }
 
 fn to_napi_result(
-    input: &str,
     output: std::result::Result<transpile::TranspileOutput, String>,
 ) -> Result<TranspileNativeResult> {
     let output = output.map_err(|message| Error::new(Status::GenericFailure, message))?;
@@ -106,8 +95,8 @@ fn to_napi_result(
             .into_iter()
             .map(|report| NativeUnsupported {
                 node_type: report.node_type.to_string(),
-                start: utf16_offset(input, report.start),
-                end: utf16_offset(input, report.end),
+                start: report.start,
+                end: report.end,
             })
             .collect(),
     })
@@ -123,10 +112,10 @@ impl Task for TranspileTask {
     type JsValue = TranspileNativeResult;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        to_napi_result(
-            &self.input,
-            transpile::transpile_caught(&self.input, &self.filename),
-        )
+        to_napi_result(transpile::transpile_caught(
+            std::mem::take(&mut self.input),
+            &self.filename,
+        ))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -152,8 +141,7 @@ pub fn transpile_native_sync(
     options: Option<TranspileNativeOptions>,
 ) -> Result<TranspileNativeResult> {
     let filename = resolve_filename(options.as_ref());
-    let input_ref = input.as_str();
-    to_napi_result(input_ref, transpile::transpile_caught(&input, &filename))
+    to_napi_result(transpile::transpile_caught(input, &filename))
 }
 
 #[cfg(test)]
@@ -172,13 +160,26 @@ mod perf_bench {
     use crate::transpile::allocator_pool;
 
     fn corpus() -> String {
+        corpus_filtered(|_| true)
+    }
+
+    /// Same corpus without the enum-declaring files: no text splices occur,
+    /// so the output side takes the in-place rewrite path.
+    fn corpus_without_enums() -> String {
+        corpus_filtered(|content| !content.contains("enum "))
+    }
+
+    fn corpus_filtered(keep: impl Fn(&str) -> bool) -> String {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test/fixture");
         let mut out = String::new();
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|e| e == "ts") {
-                out.push_str(&fs::read_to_string(path).unwrap());
-                out.push('\n');
+                let content = fs::read_to_string(path).unwrap();
+                if keep(&content) {
+                    out.push_str(&content);
+                    out.push('\n');
+                }
             }
         }
         out
@@ -223,16 +224,39 @@ mod perf_bench {
         while corpus.len() < 100_000 {
             corpus.push_str(&original);
         }
-        println!("input: {} bytes", corpus.len());
+        let original_plain = corpus_without_enums();
+        let mut corpus_plain = original_plain.clone();
+        while corpus_plain.len() < 100_000 {
+            corpus_plain.push_str(&original_plain);
+        }
+        println!(
+            "input: {} bytes ({} without enums)",
+            corpus.len(),
+            corpus_plain.len()
+        );
 
         transpile_for_bench(&corpus);
+        transpile_for_bench(&corpus_plain);
 
-        let iters = 100;
+        let iters = std::env::var("PERF_ITERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(100);
         let pool = allocator_pool();
         let (p_min, p_mean) = time_it(iters, || parse_only(pool, &corpus, false));
         let (pt_min, pt_mean) = time_it(iters, || parse_only(pool, &corpus, true));
+        // the input copy stands in for the JS-string → Rust-String copy the
+        // napi boundary always performs; timed separately so the pipeline
+        // cost (flatten + walk + output) can be derived by subtraction
+        let (c_min, c_mean) = time_it(iters, || {
+            let copy = corpus.clone();
+            std::hint::black_box(&copy);
+        });
         let (t_min, t_mean) = time_it(iters, || {
             transpile_for_bench(&corpus);
+        });
+        let (tp_min, tp_mean) = time_it(iters, || {
+            transpile_for_bench(&corpus_plain);
         });
         println!(
             "parse-only      min={:>5}us mean={:>5}us",
@@ -245,14 +269,27 @@ mod perf_bench {
             pt_mean / 1000
         );
         println!(
-            "full transpile  min={:>5}us mean={:>5}us",
+            "input copy      min={:>5}us mean={:>5}us",
+            c_min / 1000,
+            c_mean / 1000
+        );
+        println!(
+            "full transpile  min={:>5}us mean={:>5}us  (enum corpus, output fallback path)",
             t_min / 1000,
             t_mean / 1000
+        );
+        println!(
+            "no-enum variant min={:>5}us mean={:>5}us  (output rewrites in place)",
+            tp_min / 1000,
+            tp_mean / 1000
         );
     }
 
     fn transpile_for_bench(input: &str) -> usize {
-        let output = crate::transpile::transpile(input, "input.ts").expect("transpiles");
+        // the clone stands in for the JS-string → Rust-String copy the napi
+        // boundary always performs, so the in-place output path is measured
+        let output =
+            crate::transpile::transpile(input.to_string(), "input.ts").expect("transpiles");
         std::hint::black_box(output.code.len() + output.unsupported.len())
     }
 }
@@ -268,7 +305,7 @@ impl Task for TranspileUnitsTask {
 
     fn compute(&mut self) -> Result<Self::Output> {
         to_napi_units_result(transpile::transpile_units_caught(
-            &self.units,
+            std::mem::take(&mut self.units),
             &self.filename,
         ))
     }
@@ -297,5 +334,6 @@ pub fn transpile_utf16_sync(
     options: Option<TranspileNativeOptions>,
 ) -> Result<TranspileUnitsResult> {
     let filename = resolve_filename(options.as_ref());
-    to_napi_units_result(transpile::transpile_units_caught(&units, &filename))
+    // one copy into an owned buffer — the output side reuses it in place
+    to_napi_units_result(transpile::transpile_units_caught(units.to_vec(), &filename))
 }

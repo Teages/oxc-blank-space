@@ -136,6 +136,49 @@ impl BlankString {
         // the buffer only ever holds input bytes, spaces, and caller text
         String::from_utf8(out).expect("output buffer is valid UTF-8")
     }
+
+    /// [`build`](Self::build) consuming the input buffer: on the common file
+    /// whose edits are all same-length overwrites, the input itself is mutated
+    /// in place and handed back, skipping the fresh allocation and full copy.
+    /// Text splices lengthen the output, a blanked non-ASCII char shrinks to
+    /// its UTF-16 width (`len_utf16` spaces for `len_utf8` bytes), and a
+    /// paren/semi marker on an empty range grows by one byte — none of those
+    /// can happen in place, so any of them falls back to [`build`](Self::build).
+    pub fn build_owned(self, input: String) -> String {
+        let bytes = input.as_bytes();
+        let mut covered_end = 0u32;
+        let in_place = self.ranges.iter().all(|&(flags, start, end, _)| {
+            let ok = flags != REPLACE_WITH_TEXT
+                && start >= covered_end
+                && (flags == REPLACE_WITH_BLANK || end > start)
+                && bytes[start as usize..end as usize].is_ascii();
+            covered_end = covered_end.max(end);
+            ok
+        });
+        if !in_place {
+            return self.build(&input);
+        }
+
+        let mut buffer = input.into_bytes();
+        for &(flags, start, end, _) in &self.ranges {
+            let mut at = start as usize;
+            if flags != REPLACE_WITH_BLANK {
+                buffer[at] = match flags {
+                    REPLACE_WITH_OPEN_PAREN => b'(',
+                    REPLACE_WITH_CLOSE_PAREN => b')',
+                    _ => b';',
+                };
+                at += 1;
+            }
+            for b in &mut buffer[at..end as usize] {
+                if *b != b'\n' && *b != b'\r' {
+                    *b = b' ';
+                }
+            }
+        }
+        // only ASCII bytes were written over valid UTF-8; validity survives
+        String::from_utf8(buffer).expect("in-place writes are ASCII-only")
+    }
 }
 
 /// Preserve newlines inside [start, end); everything else becomes one space
@@ -229,6 +272,45 @@ impl BlankString {
         out.extend_from_slice(&units[previous_unit..]);
         out
     }
+
+    /// [`build_units`](Self::build_units) consuming the input units: every
+    /// unit maps 1:1 (no UTF-8 width to shrink), so with no text splices the
+    /// units are mutated in place and handed back. Falls back to
+    /// [`build_units`](Self::build_units) on text splices or overlapping
+    /// ranges, mirroring [`build_owned`](Self::build_owned).
+    pub fn build_units_owned(self, units: Vec<u16>, byte_to_unit: &[u32]) -> Vec<u16> {
+        let mut covered_end = 0u32;
+        let in_place = self.ranges.iter().all(|&(flags, start, end, _)| {
+            let ok = flags != REPLACE_WITH_TEXT
+                && start >= covered_end
+                && (flags == REPLACE_WITH_BLANK || end > start);
+            covered_end = covered_end.max(end);
+            ok
+        });
+        if !in_place {
+            return self.build_units(&units, byte_to_unit);
+        }
+
+        let unit_at = |pos: u32| byte_to_unit.partition_point(|&b| b < pos);
+        let mut buffer = units;
+        for &(flags, start, end, _) in &self.ranges {
+            let mut at = unit_at(start);
+            if flags != REPLACE_WITH_BLANK {
+                buffer[at] = match flags {
+                    REPLACE_WITH_OPEN_PAREN => 0x28,
+                    REPLACE_WITH_CLOSE_PAREN => 0x29,
+                    _ => 0x3B,
+                };
+                at += 1;
+            }
+            for unit in &mut buffer[at..unit_at(end)] {
+                if *unit != 0x0A && *unit != 0x0D {
+                    *unit = 0x20;
+                }
+            }
+        }
+        buffer
+    }
 }
 
 #[cfg(test)]
@@ -271,5 +353,65 @@ mod tests {
     fn no_ranges_returns_input() {
         let bs = BlankString::default();
         assert_eq!(bs.build("abc"), "abc");
+    }
+
+    #[test]
+    fn build_owned_matches_build_on_the_fast_path() {
+        let input = "const a: number = 1;\ninterface S { m(): void }";
+        let make = || {
+            let mut bs = BlankString::default();
+            bs.blank(7, 15);
+            bs.blank_but_start_with_semi(18, 46);
+            bs
+        };
+        assert_eq!(make().build(input), make().build_owned(input.to_string()));
+    }
+
+    #[test]
+    fn build_owned_falls_back_on_text_overwrites() {
+        let input = "enum E { A }";
+        let make = || {
+            let mut bs = BlankString::default();
+            bs.override_range(
+                0,
+                11,
+                "var E;(function (E) { E[E[\"A\"] = 0] = \"A\"; })(E || (E = {}));",
+            );
+            bs
+        };
+        assert_eq!(make().build(input), make().build_owned(input.to_string()));
+        assert!(make().build(input).len() > input.len());
+    }
+
+    #[test]
+    fn build_owned_falls_back_on_non_ascii_blanks() {
+        // U+00E9 is 2 UTF-8 bytes but 1 UTF-16 unit: blanking shrinks the
+        // output, which cannot happen in place.
+        let input = "a: é = 1";
+        let mut bs = BlankString::default();
+        bs.blank(2, 5);
+        let slow = bs.build(input);
+        assert_eq!(slow.len(), input.len() - 1);
+        assert_eq!(bs.build_owned(input.to_string()), slow);
+    }
+
+    #[test]
+    fn build_owned_falls_back_on_overlapping_ranges() {
+        let input = "let x: T = 1;";
+        let mut bs = BlankString::default();
+        bs.blank(4, 9);
+        bs.blank(6, 12); // overlaps the first range
+        let slow = bs.build(input);
+        assert_eq!(bs.build_owned(input.to_string()), slow);
+    }
+
+    #[test]
+    fn build_units_owned_matches_build_units() {
+        let units: Vec<u16> = "a\nb: c = 1".encode_utf16().collect();
+        let byte_to_unit: Vec<u32> = (0..=units.len() as u32).collect();
+        let mut bs = BlankString::default();
+        bs.blank(3, 7);
+        let slow = bs.build_units(&units, &byte_to_unit);
+        assert_eq!(bs.build_units_owned(units, &byte_to_unit), slow);
     }
 }
