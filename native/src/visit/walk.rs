@@ -65,6 +65,128 @@ impl<'a> Visit<'a> for Flattener<'a> {
     fn leave_node(&mut self, _kind: AstKind<'a>) {
         self.stack.pop();
     }
+
+    // TS-only subtrees the walk erases wholesale without descending: the
+    // interface/type-alias/index-signature arms of `Walker::visit_node` blank
+    // the whole span, and `namespace::should_blank_module` blanks external
+    // modules and `declare global` unconditionally. Flattening their children
+    // is dead work — record the node itself (its index is still read at
+    // statement/member level) and skip the subtree. None of them can contain
+    // an enum, so `enum_indices` and the scope model stay complete.
+    fn visit_ts_interface_declaration(&mut self, it: &TSInterfaceDeclaration<'a>) {
+        let kind = AstKind::TSInterfaceDeclaration(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_type_alias_declaration(&mut self, it: &TSTypeAliasDeclaration<'a>) {
+        let kind = AstKind::TSTypeAliasDeclaration(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_index_signature(&mut self, it: &TSIndexSignature<'a>) {
+        let kind = AstKind::TSIndexSignature(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_external_module_declaration(&mut self, it: &TSExternalModuleDeclaration<'a>) {
+        let kind = AstKind::TSExternalModuleDeclaration(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_global_declaration(&mut self, it: &TSGlobalDeclaration<'a>) {
+        let kind = AstKind::TSGlobalDeclaration(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    // Type positions in otherwise-live code: annotations, type parameters and
+    // type arguments are blanked from the raw AST references the walk already
+    // holds (see `Blanker::blank_type_annotation`, `blank_type_parameters`),
+    // and the enum scans stop at type nodes — nothing inside a type is ever
+    // visited, so only the type node itself is recorded.
+    fn visit_ts_type_annotation(&mut self, it: &TSTypeAnnotation<'a>) {
+        let kind = AstKind::TSTypeAnnotation(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_type_parameter_declaration(&mut self, it: &TSTypeParameterDeclaration<'a>) {
+        let kind = AstKind::TSTypeParameterDeclaration(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_type_parameter_instantiation(&mut self, it: &TSTypeParameterInstantiation<'a>) {
+        let kind = AstKind::TSTypeParameterInstantiation(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_class_implements(&mut self, it: &TSClassImplements<'a>) {
+        let kind = AstKind::TSClassImplements(self.alloc(it));
+        self.enter_node(kind);
+        self.leave_node(kind);
+    }
+
+    // Expressions carrying a type operand: the value expression is real JS and
+    // must stay; the type operand is erased by span.
+    fn visit_ts_as_expression(&mut self, it: &TSAsExpression<'a>) {
+        let kind = AstKind::TSAsExpression(self.alloc(it));
+        self.enter_node(kind);
+        self.visit_expression(&it.expression);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_satisfies_expression(&mut self, it: &TSSatisfiesExpression<'a>) {
+        let kind = AstKind::TSSatisfiesExpression(self.alloc(it));
+        self.enter_node(kind);
+        self.visit_expression(&it.expression);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_type_assertion(&mut self, it: &TSTypeAssertion<'a>) {
+        let kind = AstKind::TSTypeAssertion(self.alloc(it));
+        self.enter_node(kind);
+        self.visit_expression(&it.expression);
+        self.leave_node(kind);
+    }
+
+    fn visit_ts_instantiation_expression(&mut self, it: &TSInstantiationExpression<'a>) {
+        let kind = AstKind::TSInstantiationExpression(self.alloc(it));
+        self.enter_node(kind);
+        self.visit_expression(&it.expression);
+        self.leave_node(kind);
+    }
+
+    // Callee/arguments are value positions; the optional type arguments are
+    // erased by span (`expression::visit_call_or_new`).
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        let kind = AstKind::CallExpression(self.alloc(it));
+        self.enter_node(kind);
+        self.visit_expression(&it.callee);
+        self.visit_arguments(&it.arguments);
+        self.leave_node(kind);
+    }
+
+    fn visit_new_expression(&mut self, it: &NewExpression<'a>) {
+        let kind = AstKind::NewExpression(self.alloc(it));
+        self.enter_node(kind);
+        self.visit_expression(&it.callee);
+        self.visit_arguments(&it.arguments);
+        self.leave_node(kind);
+    }
+
+    fn visit_tagged_template_expression(&mut self, it: &TaggedTemplateExpression<'a>) {
+        let kind = AstKind::TaggedTemplateExpression(self.alloc(it));
+        self.enter_node(kind);
+        self.visit_expression(&it.tag);
+        self.visit_template_literal(&it.quasi);
+        self.leave_node(kind);
+    }
 }
 
 /// Fill the parent array from the tree links — one sequential pass, cheap
