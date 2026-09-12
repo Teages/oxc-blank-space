@@ -23,15 +23,15 @@ use std::collections::HashMap;
 use oxc_ast::AstKind;
 use oxc_ast::ast::{Expression, TSEnumDeclaration};
 
-use super::enum_fold::eval_constant;
-use super::enum_fold_string::eval_string_constant;
-use super::enum_model::{
+use super::fold::eval_constant;
+use super::fold_string::eval_string_constant;
+use super::model::{
     ConstBinding, ConstBindings, ConstCache, DeclarationMembers, EnumDeclarations, EnumMembers,
     MemberValue, ResolveSession, StringMember, scope_chain_of,
 };
-use super::enum_register;
-use super::enum_text::{SourceText, string_literal_value_units};
-use super::walk::{Walker, expr_index};
+use super::register;
+use super::text::{SourceText, string_literal_value_units};
+use crate::visit::walk::{Walker, expr_index};
 
 /// One round's evaluated members for a single enum declaration, owned —
 /// the evaluation borrows the frozen table, the merge that follows
@@ -95,15 +95,15 @@ pub(crate) fn collect_enum_declarations<'a>(
     let light = w.node_scope.is_empty();
 
     // Enum declarations first, in source order: merge-group slots and the
-    // emit flags (see [`super::enum_register`]); the member-scope and
+    // emit flags (see [`super::register`]); the member-scope and
     // shadow bindings join once the scope array exists.
     let mut enum_declarations: Vec<Declaration<'a>> = Vec::new();
     for &index in enum_indices {
-        if let Some(enum_register::EnumRegistration {
+        if let Some(register::EnumRegistration {
             node,
             member_names,
             group_key,
-        }) = enum_register::register_enum_declaration(w, index, &mut table, &mut bindings)
+        }) = register::register_enum_declaration(w, index, &mut table, &mut bindings)
         {
             enum_declarations.push(Declaration {
                 index,
@@ -141,7 +141,7 @@ pub(crate) fn collect_enum_declarations<'a>(
         // the heavy run: every other binding joins the registry, in source
         // order
         for index in 0..w.node_count() {
-            enum_register::register_other_node(w, index as u32, &mut bindings);
+            register::register_other_node(w, index as u32, &mut bindings);
         }
     }
 

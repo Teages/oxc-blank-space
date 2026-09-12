@@ -6,7 +6,7 @@
 use oxc_ast::ast::StringLiteral;
 use oxc_span::Span;
 
-use super::walk::unit_at;
+use crate::visit::walk::unit_at;
 
 /// The source decoding context string folding reads from: the parse copy,
 /// and on the lossless UTF-16 path the original code units with their byte

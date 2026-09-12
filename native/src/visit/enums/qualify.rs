@@ -19,8 +19,8 @@ use oxc_ast::AstKind;
 use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 
-use super::enum_model::{ConstBindings, DeclarationMembers, scope_above};
-use super::walk::Walker;
+use super::model::{ConstBindings, DeclarationMembers, scope_above};
+use crate::visit::walk::Walker;
 
 /// The fixed qualifiers of one qualification walk: the enum whose members
 /// are rewritten, the member being initialized, the walker, and the
