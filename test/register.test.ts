@@ -149,6 +149,15 @@ module.exports = { ok: 'early-return' }
     `console.log('early-return:', require('./mod.ts').ok)
 `,
   )
+  // declaring a CommonJS wrapper parameter at the top level is ESM-only —
+  // the probe must compile with those parameters, like Node's own detection
+  write(
+    'wrapper-params/app.ts',
+    `const require: number = 1
+let __filename: string = 'named'
+console.log('wrapper-params', require, __filename)
+`,
+  )
 
   write('mts/sib.mts', 'export const mtsValue: number = 3\n')
   write(
@@ -271,6 +280,13 @@ describe.skipIf(!built)('petrea/register', () => {
     expect(result.stderr).toBe('')
     expect(result.status).toBe(0)
     expect(result.stdout.trim()).toBe('comment-block: block-comment-cjs')
+  })
+
+  it('classifies modules declaring wrapper parameters as ESM', () => {
+    const result = runNode('wrapper-params/app.ts', dir)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('wrapper-params 1 named')
   })
 
   it.skipIf(!hasSyncHooks)('keeps top-level return working in CommonJS files', () => {

@@ -70,17 +70,23 @@ function withoutHashbang(source: string): string {
 }
 
 /**
- * Classify stripped source by compile-probing it as a function body: the
- * module-only syntax of a file (`import`/`export` statements, `import.meta`,
- * top-level `await`) fails to compile there, while everything CommonJS files
+ * Classify stripped source by compile-probing it inside the CommonJS wrapper
+ * — the same way Node's own module detection does: the module-only syntax of
+ * a file (`import`/`export` statements, `import.meta`, top-level `await`)
+ * fails to compile there and selects ESM, while everything CommonJS files
  * legally do — top-level `return`, sloppy-mode syntax, dynamic `import()` —
- * passes. Compiling analyses real syntax, so unlike pattern matching it reads
- * module keywords wherever they appear in a line and cannot be fooled by
- * keywords inside comments or strings.
+ * passes and selects CommonJS. Declaring a wrapper parameter such as
+ * `require` or `__filename` at the top level also fails the probe and selects
+ * ESM, matching the wrapper Node would otherwise compile the file in.
+ * Compiling analyses real syntax, so unlike pattern matching it reads module
+ * keywords wherever they appear in a line and cannot be fooled by keywords
+ * inside comments or strings.
  */
+const CJS_WRAPPER_PARAMS = ['exports', 'require', 'module', '__filename', '__dirname']
+
 function probeModuleSyntax(source: string): 'module' | 'commonjs' {
   try {
-    compileFunction(withoutHashbang(source))
+    compileFunction(withoutHashbang(source), CJS_WRAPPER_PARAMS)
     return 'commonjs'
   }
   catch (error) {
