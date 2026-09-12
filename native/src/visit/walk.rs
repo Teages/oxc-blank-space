@@ -3,7 +3,6 @@
 //! `AstKind` over that flat tree.
 
 use std::collections::HashMap;
-use std::mem::take;
 use std::rc::Rc;
 
 use oxc_ast::AstKind;
@@ -14,6 +13,7 @@ use oxc_span::{GetSpan, Span};
 use oxc_syntax::node::NodeId;
 
 use super::{class, enums, expression, function, namespace, pattern, statement};
+use crate::blank::blank_string::BlankString;
 use crate::blank::blanker::{Blanker, UnsupportedSyntax};
 /// `Js`: JavaScript was (or may have been) emitted; `Blanked`: fully erased,
 /// no runtime code.
@@ -234,12 +234,14 @@ impl Iterator for Children<'_, '_> {
     }
 }
 
-/// Blank a whole program into (output, unsupported constructs).
+/// Blank a whole program, returning the collected edit list (built against
+/// `src` by the caller, which owns the input buffer) plus unsupported
+/// constructs. Report offsets are UTF-8 bytes.
 pub fn blank_program<'a>(
     program: &Program<'a>,
     src: &'a str,
     tokens: &'a [Token],
-) -> (String, Vec<UnsupportedSyntax>) {
+) -> (BlankString, Vec<UnsupportedSyntax>) {
     let mut flattener = Flattener::default();
     flattener.visit_program(program);
     let enum_indices = flattener.enum_indices;
@@ -277,8 +279,8 @@ pub fn blank_program<'a>(
     }
     walker.visit_node_array(&indices, true, false);
 
-    let output = walker.blanker.output.build(src);
-    (output, take(&mut walker.blanker.reports))
+    let blanker = walker.blanker;
+    (blanker.output, blanker.reports)
 }
 
 /// UTF-16 variant of [`blank_program`]: `parse_copy` is the lossy UTF-8 copy
@@ -290,7 +292,7 @@ pub fn blank_program_utf16<'a>(
     parse_copy: &'a str,
     byte_to_unit: &'a [u32],
     tokens: &'a [Token],
-) -> (Vec<u16>, Vec<UnsupportedSyntax>) {
+) -> (BlankString, Vec<UnsupportedSyntax>) {
     let mut flattener = Flattener::default();
     flattener.visit_program(program);
     let enum_indices = flattener.enum_indices;
@@ -327,8 +329,8 @@ pub fn blank_program_utf16<'a>(
     }
     walker.visit_node_array(&indices, true, false);
 
-    let output = walker.blanker.output.build_units(units, byte_to_unit);
-    (output, take(&mut walker.blanker.reports))
+    let blanker = walker.blanker;
+    (blanker.output, blanker.reports)
 }
 
 /// Unit index of the unit starting at byte offset `pos` (maps are strictly increasing).

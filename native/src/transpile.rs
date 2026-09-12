@@ -31,6 +31,19 @@ pub struct TranspileUnitsOutput {
     pub unsupported: Vec<UnsupportedSyntax>,
 }
 
+/// The API contract (`types.ts`) promises JS string indices (UTF-16 code
+/// units); internal spans are UTF-8 bytes, so convert.
+fn utf16_offset(input: &str, byte_offset: u32) -> u32 {
+    if input.is_ascii() {
+        return byte_offset;
+    }
+    let mut offset = byte_offset as usize;
+    while offset > 0 && !input.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    input[..offset].chars().map(|c| c.len_utf16() as u32).sum()
+}
+
 /// Replace TypeScript-only syntax with whitespace, keeping the remaining
 /// JavaScript byte-for-byte at its original line and column positions.
 ///
@@ -39,7 +52,11 @@ pub struct TranspileUnitsOutput {
 /// verbatim and reported through `TranspileOutput::unsupported`. Inputs that
 /// are not valid TypeScript — including `as`/`satisfies` erasures that would
 /// change operator grouping, which TypeScript itself rejects — return an error.
-pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String> {
+///
+/// Takes the input by value: the napi boundary already hands over an owned
+/// `String`, and the output side can reuse that buffer in place when the
+/// edits allow it (see `blank_string::BlankString::build_owned`).
+pub fn transpile(input: String, filename: &str) -> Result<TranspileOutput, String> {
     let allocator_guard = allocator_pool().get();
     let allocator: &Allocator = &allocator_guard;
     // unknown/no extension falls back to plain JavaScript (module, no JSX):
@@ -47,7 +64,7 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
     let source_type = SourceType::from_path(filename)
         .unwrap_or_else(|_| SourceType::mjs())
         .with_module(true);
-    let return_value = Parser::new(allocator, input, source_type)
+    let return_value = Parser::new(allocator, input.as_str(), source_type)
         .with_config(TokensParserConfig)
         .parse();
 
@@ -63,22 +80,38 @@ pub fn transpile(input: &str, filename: &str) -> Result<TranspileOutput, String>
             .iter()
             .map(|d| {
                 d.clone()
-                    .render_with_source_code(NamedSource::new(filename, input.to_string()))
+                    .render_with_source_code(NamedSource::new(filename, input.clone()))
             })
             .collect::<Vec<_>>()
             .join("\n");
         return Err(format!("failed to parse {filename}:\n{details}"));
     }
 
-    let (code, unsupported) = blank_program(&return_value.program, input, &return_value.tokens);
-    Ok(TranspileOutput { code, unsupported })
+    let (output, unsupported) =
+        blank_program(&return_value.program, input.as_str(), &return_value.tokens);
+    // the input is still alive here but consumed by build_owned below, so the
+    // report offsets (UTF-8 bytes) are converted to the promised UTF-16 units first
+    let unsupported = unsupported
+        .into_iter()
+        .map(|report| UnsupportedSyntax {
+            start: utf16_offset(&input, report.start),
+            end: utf16_offset(&input, report.end),
+            ..report
+        })
+        .collect();
+
+    Ok(TranspileOutput {
+        code: output.build_owned(input),
+        unsupported,
+    })
 }
 
 /// Lossless UTF-16 variant of [`transpile`]: the parser works on a lossy UTF-8
 /// copy (raw lone surrogates cannot exist in Rust strings), but every output
 /// unit is taken from the original units, so raw lone surrogates survive.
-/// Report offsets are UTF-16 code units.
-pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOutput, String> {
+/// Report offsets are UTF-16 code units. Like [`transpile`], the units are
+/// taken by value so the output can reuse the buffer in place.
+pub fn transpile_units(units: Vec<u16>, filename: &str) -> Result<TranspileUnitsOutput, String> {
     // Lossy parse copy: pairs become the astral character, every other unit
     // maps to itself when possible, U+FFFD otherwise; the byte length per
     // unit is tracked so spans can be mapped back.
@@ -145,9 +178,9 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         return Err(format!("failed to parse {filename}:\n{details}"));
     }
 
-    let (code_units, unsupported) = blank_program_utf16(
+    let (output, unsupported) = blank_program_utf16(
         &return_value.program,
-        units,
+        &units,
         &parse_copy,
         &byte_to_unit,
         &return_value.tokens[..],
@@ -164,14 +197,14 @@ pub fn transpile_units(units: &[u16], filename: &str) -> Result<TranspileUnitsOu
         .collect();
 
     Ok(TranspileUnitsOutput {
-        code: code_units,
+        code: output.build_units_owned(units, &byte_to_unit),
         unsupported,
     })
 }
 
 /// [`transpile_units`] with panic containment (see [`transpile_caught`]).
 pub fn transpile_units_caught(
-    units: &[u16],
+    units: Vec<u16>,
     filename: &str,
 ) -> Result<TranspileUnitsOutput, String> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -196,7 +229,7 @@ pub fn transpile_units_caught(
 /// [`transpile`] with panic containment: a bug in an untested AST corner must
 /// surface as a JS exception, not abort the process — napi does not catch
 /// unwinds by default, for the sync binding or async task compute alike.
-pub fn transpile_caught(input: &str, filename: &str) -> Result<TranspileOutput, String> {
+pub fn transpile_caught(input: String, filename: &str) -> Result<TranspileOutput, String> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transpile(input, filename))) {
         Ok(result) => result,
         Err(payload) => {
@@ -221,17 +254,34 @@ mod tests {
     #[test]
     fn blanks_marker_between_comments() {
         // the `?`/`!` marker sits between two comments; locating it hops the trailing comment
-        let output = transpile("class C { private f2/**/!/**/: string; }", "input.ts").unwrap();
+        let output = transpile(
+            "class C { private f2/**/!/**/: string; }".to_string(),
+            "input.ts",
+        )
+        .unwrap();
         assert_eq!(output.code, "class C {         f2/**/ /**/        ; }");
     }
 
     #[test]
     fn reports_and_rejects() {
-        let output =
-            transpile("class C { constructor(private a: string) {} }", "input.ts").unwrap();
+        let output = transpile(
+            "class C { constructor(private a: string) {} }".to_string(),
+            "input.ts",
+        )
+        .unwrap();
         assert_eq!(output.unsupported.len(), 1);
         assert_eq!(output.unsupported[0].node_type, "TSParameterProperty");
 
-        assert!(transpile("1 + 1 as T / 2;", "input.ts").is_err());
+        assert!(transpile("1 + 1 as T / 2;".to_string(), "input.ts").is_err());
+    }
+
+    #[test]
+    fn output_reuses_input_length_on_the_fast_path() {
+        // a file with no enum expansions or grouping-constant text splices
+        // blanks in place: output length equals input length, positions intact
+        let input = "const a: number = 1;\nlet b = a as string;\ntype T = typeof a;\n";
+        let output = transpile(input.to_string(), "input.ts").unwrap();
+        assert_eq!(output.code.len(), input.len());
+        assert_eq!(output.code.lines().count(), input.lines().count());
     }
 }
