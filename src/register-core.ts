@@ -1,31 +1,14 @@
 import type { LoadFnOutput, LoadHookContext, ResolveFnOutput, ResolveHookContext } from 'node:module'
 import type { UnsupportedSyntax } from './types'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { compileFunction } from 'node:vm'
 import { transpileSync } from './index'
 
 /** Extensions whose modules petrea strips before Node parses them. */
 const STRIPPED_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
-
-/**
- * `import`/`export` starting a line. Both keywords are fully reserved, so a
- * match outside a string or template literal can only be module syntax;
- * `import(` and `import.meta` are deliberately excluded because dynamic
- * import is valid CommonJS too.
- */
-const ESM_SYNTAX = /^[ \t]*(?:import[\s'"{]|import\.meta|export[\s{*])/m
-
-/**
- * `import`/`export` statements survive stripping only when they carry runtime
- * meaning, so the raw file is a good enough oracle — the one divergence from
- * sniffing the stripped output (`export type` lines) still yields a module
- * that parses, which is the safer of the two failures.
- */
-function looksLikeEsm(source: string): boolean {
-  return ESM_SYNTAX.test(source)
-}
 
 /** module type declared by the nearest package.json, if any. */
 const packageTypeCache = new Map<string, 'module' | 'commonjs' | undefined>()
@@ -61,32 +44,51 @@ function packageType(dir: string): 'module' | 'commonjs' | undefined {
 }
 
 /**
- * The module format Node should compile a stripped file as. `.mts`/`.cts`
- * carry their format in the extension; for `.ts`/`.tsx` an explicit
- * package.json `type` wins and otherwise module syntax decides, mirroring
- * Node's own module detection. Cached so the resolve and load hooks — which
- * both need it — read and classify each file once.
+ * The format a stripped file compiles as. `.mts`/`.cts` carry their format in
+ * the extension; for `.ts`/`.tsx` an explicit package.json `type` wins and
+ * otherwise the source syntax decides, mirroring Node's module detection.
  */
-const formatCache = new Map<string, 'module' | 'commonjs'>()
-
-function moduleFormat(path: string): 'module' | 'commonjs' {
-  let format = formatCache.get(path)
-  if (format === undefined) {
-    switch (extname(path)) {
-      case '.mts':
-        format = 'module'
-        break
-      case '.cts':
-        format = 'commonjs'
-        break
-      default: {
-        const declared = packageType(dirname(path))
-        format = declared ?? (looksLikeEsm(readFileSync(path, 'utf8')) ? 'module' : 'commonjs')
-      }
-    }
-    formatCache.set(path, format)
+function formatOf(path: string, source: string): 'module' | 'commonjs' {
+  switch (extname(path)) {
+    case '.mts':
+      return 'module'
+    case '.cts':
+      return 'commonjs'
+    default:
+      return packageType(dirname(path)) ?? probeModuleSyntax(source)
   }
-  return format
+}
+
+// a hashbang may open a script or module but cannot appear inside the
+// function body the probe compiles
+function withoutHashbang(source: string): string {
+  if (!source.startsWith('#!')) {
+    return source
+  }
+  const newline = source.indexOf('\n')
+  return newline === -1 ? '' : source.slice(newline + 1)
+}
+
+/**
+ * Classify stripped source by compile-probing it as a function body: the
+ * module-only syntax of a file (`import`/`export` statements, `import.meta`,
+ * top-level `await`) fails to compile there, while everything CommonJS files
+ * legally do — top-level `return`, sloppy-mode syntax, dynamic `import()` —
+ * passes. Compiling analyses real syntax, so unlike pattern matching it reads
+ * module keywords wherever they appear in a line and cannot be fooled by
+ * keywords inside comments or strings.
+ */
+function probeModuleSyntax(source: string): 'module' | 'commonjs' {
+  try {
+    compileFunction(withoutHashbang(source))
+    return 'commonjs'
+  }
+  catch (error) {
+    if (!(error instanceof SyntaxError)) {
+      throw error
+    }
+    return 'module'
+  }
 }
 
 /** Decoded path when the URL points at an existing file petrea strips. */
@@ -119,29 +121,6 @@ function specifierFileUrl(specifier: string, parentURL?: string): string | undef
   return undefined
 }
 
-/**
- * Claim strippable files during resolution and hand Node their format
- * outright: without an explicit format, Node's own extension table rejects
- * `.ts` before the load hook ever runs on versions without native type
- * stripping. Extensionless specifiers and directory imports stay with the
- * default resolver — explicit extensions are required, matching Node's own
- * stripped-TypeScript rules.
- */
-export function resolveTypeScript(
-  specifier: string,
-  context: ResolveHookContext,
-  nextResolve: (specifier: string, context?: Partial<ResolveHookContext>) => ResolveFnOutput | Promise<ResolveFnOutput>,
-): ResolveFnOutput | Promise<ResolveFnOutput> {
-  const url = specifierFileUrl(specifier, context.parentURL)
-  if (url !== undefined) {
-    const path = strippablePath(url)
-    if (path !== undefined) {
-      return { url, format: moduleFormat(path), shortCircuit: true }
-    }
-  }
-  return nextResolve(specifier, context)
-}
-
 /** 1-based position of a UTF-16 character offset, for warning messages. */
 function positionOf(source: string, offset: number): { line: number, column: number } {
   let line = 1
@@ -172,6 +151,81 @@ function warnUnsupported(filename: string, source: string, node: UnsupportedSynt
   )
 }
 
+interface FileFacts {
+  format: 'module' | 'commonjs'
+  source: string
+}
+
+const factsCache = new Map<string, { mtimeMs: number, facts: FileFacts }>()
+
+/** Strip and classify a file once per mtime revision. */
+function fileFacts(path: string): FileFacts {
+  const { mtimeMs } = statSync(path)
+  const cached = factsCache.get(path)
+  if (cached !== undefined && cached.mtimeMs === mtimeMs) {
+    return cached.facts
+  }
+  const input = readFileSync(path, 'utf8')
+  const source = transpileSync(input, {
+    filename: path,
+    lang: extname(path) === '.tsx' ? 'tsx' : 'ts',
+    onError: node => warnUnsupported(path, input, node),
+  })
+  const facts = { format: formatOf(path, source), source }
+  factsCache.set(path, { mtimeMs, facts })
+  return facts
+}
+
+/**
+ * Resolve hook shared by the in-thread and threaded registrations. Resolution
+ * itself is delegated to Node's default resolver whenever it succeeds — that
+ * keeps symlink handling, `--preserve-symlinks` semantics and every specifier
+ * form exactly as Node performs them — and strippable results are claimed so
+ * the load hook runs for them. Node versions without native TypeScript
+ * support reject strippable specifiers inside the default resolver; those
+ * fall back to lexical resolution, following symlinks like the default
+ * resolution does so relative imports inside a symlinked file keep resolving
+ * against its real location.
+ */
+export function resolveTypeScript(
+  specifier: string,
+  context: ResolveHookContext,
+  nextResolve: (specifier: string, context?: Partial<ResolveHookContext>) => ResolveFnOutput | Promise<ResolveFnOutput>,
+): ResolveFnOutput | Promise<ResolveFnOutput> {
+  const claim = (result: ResolveFnOutput): ResolveFnOutput => {
+    const path = strippablePath(result.url)
+    return path === undefined ? result : { ...result, shortCircuit: true }
+  }
+  const lexical = (resolutionError: unknown): ResolveFnOutput => {
+    const url = specifierFileUrl(specifier, context.parentURL)
+    if (url !== undefined) {
+      const path = strippablePath(url)
+      if (path !== undefined) {
+        const resolved = preserveSymlinks() ? path : realpathSync(path)
+        return {
+          url: pathToFileURL(resolved).href,
+          format: fileFacts(resolved).format,
+          shortCircuit: true,
+        }
+      }
+    }
+    throw resolutionError
+  }
+  try {
+    const delegated = nextResolve(specifier, context)
+    return delegated instanceof Promise
+      ? delegated.then(claim, lexical)
+      : claim(delegated)
+  }
+  catch (error) {
+    return lexical(error)
+  }
+}
+
+function preserveSymlinks(): boolean {
+  return process.execArgv.includes('--preserve-symlinks')
+}
+
 /**
  * Load hook shared by the in-thread and threaded registrations: strip
  * strippable files, delegate everything else. Synchronous by design — the
@@ -189,11 +243,6 @@ export function loadTypeScript(
   if (path === undefined) {
     return nextLoad(url, context)
   }
-  const input = readFileSync(path, 'utf8')
-  const source = transpileSync(input, {
-    filename: path,
-    lang: extname(path) === '.tsx' ? 'tsx' : 'ts',
-    onError: node => warnUnsupported(path, input, node),
-  })
-  return { format: moduleFormat(path), source, shortCircuit: true }
+  const { format, source } = fileFacts(path)
+  return { format, source, shortCircuit: true }
 }

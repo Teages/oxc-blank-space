@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import * as nodeModule from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -24,6 +24,7 @@ function runNode(entry: string, cwd: string) {
 }
 
 let dir: string
+let symlinkOk = false
 
 function write(relative: string, content: string): string {
   const path = join(dir, relative)
@@ -108,6 +109,47 @@ console.log(label)
 `,
   )
 
+  // module syntax beyond line-start keywords: mid-line export, top-level
+  // await, and keywords inside comments must not flip the classification
+  write(
+    'midline/app.ts',
+    `const x: number = 1; export { x }; console.log('midline', x)
+`,
+  )
+  write(
+    'tla/app.ts',
+    `const value: string = await Promise.resolve('tla')
+console.log('tla-ok', value)
+`,
+  )
+  write(
+    'comment-block/mod.ts',
+    `/*
+export { definitelyNotRealSyntax }
+*/
+const label: string = 'block-comment-cjs'
+module.exports = { label }
+`,
+  )
+  write(
+    'comment-block/main.cjs',
+    `console.log('comment-block:', require('./mod.ts').label)
+`,
+  )
+  // a CommonJS file may return from the top level; the classification probe
+  // must compile in a context where that is legal
+  write(
+    'early-return/mod.ts',
+    `if (process.env.PETREA_NEVER_SET) return
+module.exports = { ok: 'early-return' }
+`,
+  )
+  write(
+    'early-return/main.cjs',
+    `console.log('early-return:', require('./mod.ts').ok)
+`,
+  )
+
   write('mts/sib.mts', 'export const mtsValue: number = 3\n')
   write(
     'mts/entry.mts',
@@ -147,6 +189,31 @@ console.log('pkg', tiny())
 new C('x')
 `,
   )
+
+  // relative imports inside symlinked files must resolve against the real
+  // location, matching Node's default realpath resolution
+  write(
+    'real-pkg/dep.ts',
+    `export const dep = (): string => 'dep-ok'
+`,
+  )
+  write(
+    'real-pkg/main.ts',
+    `import { dep } from './dep.ts'
+console.log('symlink', dep(), import.meta.url.includes('real-pkg') ? 'real' : 'alias')
+`,
+  )
+  write('host.mjs', `import './alias-main.ts'
+import './alias-pkg/main.ts'
+`)
+  try {
+    symlinkSync(join(dir, 'real-pkg', 'main.ts'), join(dir, 'alias-main.ts'))
+    symlinkSync(join(dir, 'real-pkg'), join(dir, 'alias-pkg'))
+    symlinkOk = true
+  }
+  catch {
+    // platforms without symlink privileges skip the case
+  }
 })
 
 describe.skipIf(!built)('petrea/register', () => {
@@ -183,6 +250,48 @@ describe.skipIf(!built)('petrea/register', () => {
     expect(result.stderr).toBe('')
     expect(result.status).toBe(0)
     expect(result.stdout.trim()).toBe('sniffed-cjs')
+  })
+
+  it('classifies manifest-less modules with mid-line export syntax', () => {
+    const result = runNode('midline/app.ts', dir)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('midline 1')
+  })
+
+  it('classifies manifest-less modules using top-level await', () => {
+    const result = runNode('tla/app.ts', dir)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('tla-ok tla')
+  })
+
+  it.skipIf(!hasSyncHooks)('is not fooled by module keywords inside comments', () => {
+    const result = runNode('comment-block/main.cjs', dir)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('comment-block: block-comment-cjs')
+  })
+
+  it.skipIf(!hasSyncHooks)('keeps top-level return working in CommonJS files', () => {
+    const result = runNode('early-return/main.cjs', dir)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('early-return: early-return')
+  })
+
+  it('resolves relative imports inside symlinked files against their real location', ({ skip }) => {
+    // decided at runtime: skipIf evaluates before beforeAll creates the links
+    if (!symlinkOk) {
+      skip('symlinks unavailable on this platform')
+    }
+    const result = runNode('host.mjs', dir)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    // both the symlinked file and the symlinked package resolve to the same
+    // real module, which executes exactly once — and its own relative import
+    // found the sibling next to the real location
+    expect(result.stdout.trim().split('\n')).toEqual(['symlink dep-ok real'])
   })
 
   it('runs .mts entries as ESM and .cts entries as CommonJS', () => {
